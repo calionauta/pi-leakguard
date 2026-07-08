@@ -299,12 +299,13 @@ export interface RedactStats {
 
 export function redactSecretsInText(
   text: string,
-  stats: RedactStats
+  stats: RedactStats,
+  patterns: SecretPattern[] = SECRET_PATTERNS
 ): { text: string; count: number } {
   let result = text;
   let totalCount = 0;
 
-  for (const pattern of SECRET_PATTERNS) {
+  for (const pattern of patterns) {
     const freshRegex = new RegExp(pattern.pattern.source, pattern.pattern.flags);
     const matches = result.match(freshRegex);
     if (!matches || matches.length === 0) {
@@ -420,6 +421,119 @@ export function isTaintedEgress(
     return true;
   }
   return false;
+}
+
+// ============================================================================
+// Extensible configuration (allow/block paths + extra secret patterns)
+// ============================================================================
+
+export interface LeakguardConfig {
+  mode?: "max" | "basic" | "off";
+  allowPaths?: string[];
+  blockPaths?: string[];
+  extraSecretPatterns?: { name: string; pattern: string; severity?: string }[];
+}
+
+export const DEFAULT_CONFIG: LeakguardConfig = {};
+
+export function buildConfig(user: LeakguardConfig = {}): {
+  allow: RegExp[];
+  block: RegExp[];
+  secretPatterns: SecretPattern[];
+} {
+  const allow = (user.allowPaths ?? []).map((s) => new RegExp(s, "i"));
+  const block = (user.blockPaths ?? []).map((s) => new RegExp(s, "i"));
+  const secretPatterns = [
+    ...SECRET_PATTERNS,
+    ...(user.extraSecretPatterns ?? []).map((p) => ({
+      name: p.name,
+      pattern: new RegExp(p.pattern, "gi"),
+      severity: (p.severity ?? "high") as SecretPattern["severity"],
+    })),
+  ];
+  return { allow, block, secretPatterns };
+}
+
+export function checkPathSensitivityExtended(
+  path: string,
+  allow: RegExp[],
+  block: RegExp[]
+): { matched: boolean; category: string; source: "default" | "allow" | "block" } {
+  const normalized = normalizePath(path);
+
+  for (const re of allow) {
+    if (re.test(normalized)) {
+      return { matched: false, category: "allowlisted", source: "allow" };
+    }
+  }
+
+  for (const re of block) {
+    if (re.test(normalized)) {
+      return { matched: true, category: "Custom block", source: "block" };
+    }
+  }
+
+  const def = checkPathSensitivity(normalized);
+  if (def.matched) {
+    return { matched: true, category: def.pattern!.category, source: "default" };
+  }
+
+  return { matched: false, category: "", source: "default" };
+}
+
+// ============================================================================
+// Audit log (global observability)
+// ============================================================================
+
+export interface AuditEntry {
+  ts: string;
+  event: "block" | "redact" | "allow";
+  tool: string;
+  reason?: string;
+  category?: string;
+  count?: number;
+}
+
+/**
+ * Append a JSONL audit entry. Pure aside from the fs append; callers pass an
+ * open-able path. Returns the line written (for testing without touching disk
+ * by passing a no-op via the `append` injector).
+ */
+export function formatAuditEntry(e: AuditEntry): string {
+  return JSON.stringify(e) + "\n";
+}
+
+// ============================================================================
+// Pre-commit / pre-push secret scan
+// ============================================================================
+
+// Git subcommands that publish content outside the sandbox.
+const GIT_PUBLISH_CMDS = new Set(["push", "commit", "commit-tree", "send-pack", "upload-pack"]);
+
+/**
+ * Detect a git publish command (commit/push) so the caller can scan the diff.
+ * Returns the subcommand or undefined.
+ */
+export function detectGitPublish(command: string): string | undefined {
+  const words = shellWords(command.normalize("NFKC"));
+  if (words[0]?.toLowerCase() !== "git" && words[0]?.toLowerCase() !== "git.exe") return undefined;
+  const sub = words[1]?.toLowerCase();
+  if (sub && GIT_PUBLISH_CMDS.has(sub)) return sub;
+  return undefined;
+}
+
+/**
+ * Scan arbitrary text (e.g. a git diff) for secret material. Uses the same
+ * SECRET_VALUE_RE / SECRET_ASSIGNMENT_RE as the redactor, plus the high-entropy
+ * private-key block. Returns matched pattern names. This is the last line of
+ * defense: even if redaction misses, secrets never leave the repo.
+ */
+export function scanForSecrets(text: string, extraPatterns: SecretPattern[] = SECRET_PATTERNS): string[] {
+  const found: string[] = [];
+  for (const p of extraPatterns) {
+    if (p.pattern.test(text)) found.push(p.name);
+  }
+  return [...new Set(found)];
 }
 
 // Re-export for convenience

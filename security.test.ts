@@ -8,15 +8,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildConfig,
   checkBashExfil,
   checkBashWords,
   checkEgressSecrets,
   checkObfuscation,
   checkPathSensitivity,
+  checkPathSensitivityExtended,
+  detectGitPublish,
+  formatAuditEntry,
   hasSecretMaterial,
   isTaintedEgress,
   redactSecretsInText,
   resolvePath,
+  scanForSecrets,
   type RedactStats,
 } from "./security.js";
 
@@ -304,4 +309,71 @@ test("isTaintedEgress blocks credentialed URL in payload when tainted", () => {
 
 test("checkEgressSecrets independently blocks credentialed URL", () => {
   assert.ok(checkEgressSecrets("curl http://user:pass@host.com"));
+});
+
+// ============================================================================
+// Extensible config (allow/block paths + extra secret patterns)
+// ============================================================================
+
+test("checkPathSensitivityExtended: default block wins", () => {
+  const r = checkPathSensitivityExtended("/home/user/.env", [], []);
+  assert.ok(r.matched);
+  assert.equal(r.source, "default");
+});
+
+test("checkPathSensitivityExtended: custom block path", () => {
+  const r = checkPathSensitivityExtended("/secret/company.key", [], [/company/]);
+  assert.ok(r.matched);
+  assert.equal(r.source, "block");
+});
+
+test("checkPathSensitivityExtended: allow overrides block", () => {
+  const r = checkPathSensitivityExtended("/home/user/.env", [/home\/user\/.env/], [/\.env$/]);
+  assert.equal(r.matched, false);
+  assert.equal(r.source, "allow");
+});
+
+test("buildConfig merges extra secret patterns", () => {
+  const cfg = buildConfig({ extraSecretPatterns: [{ name: "MyToken", pattern: "mytoken_[0-9]+" }] });
+  assert.ok(cfg.secretPatterns.some((p) => p.name === "MyToken"));
+  assert.ok(cfg.secretPatterns.some((p) => p.name === "AWS Access Key ID"));
+});
+
+test("buildConfig compiles allow/block regexes", () => {
+  const cfg = buildConfig({ allowPaths: ["/safe/"], blockPaths: ["/secret/"] });
+  assert.equal(cfg.allow.length, 1);
+  assert.equal(cfg.block.length, 1);
+});
+
+// ============================================================================
+// Pre-commit / pre-push secret scan
+// ============================================================================
+
+test("detectGitPublish finds push and commit", () => {
+  assert.equal(detectGitPublish("git push origin main"), "push");
+  assert.equal(detectGitPublish("git commit -m 'x'"), "commit");
+  assert.equal(detectGitPublish("git status"), undefined);
+  assert.equal(detectGitPublish("ls -la"), undefined);
+});
+
+test("scanForSecrets finds AWS key in diff text", () => {
+  const found = scanForSecrets('diff --git a/x b/x\n+const k = \'AKIAIOSFODNN7EXAMPLE\';');
+  assert.ok(found.includes("AWS Access Key ID"));
+});
+
+test("scanForSecrets clean on normal diff", () => {
+  const found = scanForSecrets('diff --git a/x b/x\n+console.log(\'hello\');');
+  assert.equal(found.length, 0);
+});
+
+// ============================================================================
+// Audit log format
+// ============================================================================
+
+test("formatAuditEntry produces valid JSONL line", () => {
+  const line = formatAuditEntry({ ts: "2026-01-01T00:00:00Z", event: "block", tool: "bash", category: "Egress DLP" });
+  const parsed = JSON.parse(line.trim());
+  assert.equal(parsed.event, "block");
+  assert.equal(parsed.tool, "bash");
+  assert.ok(line.endsWith("\n"));
 });

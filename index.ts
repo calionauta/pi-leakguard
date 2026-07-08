@@ -9,28 +9,32 @@
  *   - basic: Allow reads but still redact secrets from output (Safe Debugging)
  *   - off: Disable all protection
  *
- * Security layers (defense-in-depth, ported from @raquezha/noleaks):
+ * Security layers (defense-in-depth):
  *   - Symlink guard: paths are resolved to their real location before checks.
+ *   - Path protection: blocks reads/writes/deletes of sensitive paths.
+ *   - Secret redaction: scrubs secrets from tool output.
  *   - Obfuscation detection: NFKC normalization variance + hidden/control chars.
- *   - Env-dump block: `env`/`printenv`/`set`/`export` in shell commands.
- *   - Sensitive shell expansion: `$TOKEN`, `$SECRET`, `$PASSWORD`, etc.
- *   - Transform+smuggle: base64/openssl/gpg piping secret-looking material.
- *   - Discovery/exfil combine: nmap/curl/nc + sensitive material.
- *   - Universal word scan: critical utilities as arguments (sudo chmod, dd, shred).
- *   - Write/edit payload scan: blocks writes containing secret-looking material.
- *   - grep/find/ls guard: blocks these tools over sensitive paths in max mode.
- *   - Persistence: mode survives sessions via ~/.pi/agent/leakguard.json.
+ *   - Shell exfiltration: env-dump, sensitive expansion, transform-smuggle,
+ *     discovery/exfil combine.
+ *   - Egress DLP: blocks network egress carrying inline creds / secret headers.
+ *   - Universal word scan: critical utilities as arguments.
+ *   - Write/edit payload scan + taint tracking.
+ *   - Pre-commit/push secret scan (last line of defense).
+ *   - Extensible config: allow/block paths + extra secret patterns.
+ *   - Audit log: ~/.pi/agent/leakguard-audit.jsonl.
  *
  * Usage:
  *   /leakguard              - Show session statistics
  *   /leakguard mode max     - Switch to MAX mode
  *   /leakguard mode basic   - Switch to BASIC mode
  *   /leakguard mode off     - Switch to OFF mode (DANGEROUS)
+ *   /leakguard yolo         - Skip confirm prompts this session (redaction stays on)
  */
 
 import { homedir } from "node:os";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 
 import type {
   BashToolInput,
@@ -43,15 +47,21 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import {
+  buildConfig,
   checkBashExfil,
   checkBashWords,
   checkEgressSecrets,
   checkObfuscation,
-  checkPathSensitivity,
+  checkPathSensitivityExtended,
+  detectGitPublish,
   hasSecretMaterial,
   isTaintedEgress,
   redactSecretsInText,
   resolvePath,
+  scanForSecrets,
+  formatAuditEntry,
+  type AuditEntry,
+  type LeakguardConfig,
   type RedactStats,
 } from "./security.js";
 
@@ -72,6 +82,8 @@ interface ExtensionState {
   mode: Mode;
   yolo: boolean;
   taintedPaths: Set<string>;
+  config: ReturnType<typeof buildConfig>;
+  cwdFallback: string;
   stats: SessionStats;
 }
 
@@ -88,6 +100,7 @@ const EXTENSION_NAME = "leakguard";
 const DEFAULT_MODE: Mode = "max";
 const STATUS_KEY = "leakguard-mode";
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "leakguard.json");
+const AUDIT_PATH = join(homedir(), ".pi", "agent", "leakguard-audit.jsonl");
 
 // Shell commands that read files
 const FILE_READ_COMMANDS = new Set([
@@ -121,9 +134,9 @@ function getModeIcon(mode: Mode): string {
 
 function getModeLabel(mode: Mode): string {
   switch (mode) {
-    case "max": return "noLeak MAX";
-    case "basic": return "noLeak BASIC";
-    case "off": return "noLeak OFF";
+    case "max": return "leakguard MAX";
+    case "basic": return "leakguard BASIC";
+    case "off": return "leakguard OFF";
   }
 }
 
@@ -154,30 +167,41 @@ function getShellCommandName(command: string): string {
 }
 
 // ============================================================================
-// Persistence (ported from @raquezha/noleaks)
+// Persistence + audit (extensible config)
 // ============================================================================
 
-function loadConfig(): Mode {
+function loadConfig(): { mode: Mode; raw: LeakguardConfig } {
+  const fallback: { mode: Mode; raw: LeakguardConfig } = { mode: DEFAULT_MODE, raw: {} };
   try {
     if (existsSync(CONFIG_PATH)) {
-      const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
-      if (config.mode === "max" || config.mode === "basic" || config.mode === "off") {
-        return config.mode;
-      }
+      const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as LeakguardConfig;
+      const mode = raw.mode === "max" || raw.mode === "basic" || raw.mode === "off" ? raw.mode : DEFAULT_MODE;
+      return { mode, raw };
     }
   } catch {
     // ignore unreadable config
   }
-  return DEFAULT_MODE;
+  return fallback;
 }
 
 function saveConfig(mode: Mode): void {
   try {
     const dir = join(homedir(), ".pi", "agent");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(CONFIG_PATH, JSON.stringify({ mode }), "utf8");
+    const existing = existsSync(CONFIG_PATH) ? JSON.parse(readFileSync(CONFIG_PATH, "utf8") as string) : {};
+    writeFileSync(CONFIG_PATH, JSON.stringify({ ...existing, mode }), "utf8");
   } catch {
     // ignore unwritable config
+  }
+}
+
+function audit(e: AuditEntry): void {
+  try {
+    const dir = join(homedir(), ".pi", "agent");
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    appendFileSync(AUDIT_PATH, formatAuditEntry(e), "utf8");
+  } catch {
+    // ignore unwritable audit log
   }
 }
 
@@ -186,10 +210,13 @@ function saveConfig(mode: Mode): void {
 // ============================================================================
 
 export default function leakguardPersonal(pi: ExtensionAPI): void {
+  const loaded = loadConfig();
   const state: ExtensionState = {
-    mode: loadConfig(),
+    mode: loaded.mode,
     yolo: false,
     taintedPaths: new Set<string>(),
+    config: buildConfig(loaded.raw),
+    cwdFallback: process.cwd(),
     stats: {
       blockedCalls: 0,
       redactedSecrets: 0,
@@ -230,11 +257,18 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     body: string,
     category: string
   ): Promise<boolean> => {
-    if (state.yolo) return true; // YOLO: allow without asking
+    if (state.yolo) {
+      audit({ ts: new Date().toISOString(), event: "allow", tool: "confirm", category, reason: "yolo" });
+      return true; // YOLO: allow without asking
+    }
     recordBlock(category);
     const ok = await ctx.ui.confirm(title, body);
-    if (!ok) return false; // user denied → keep blocked
+    if (!ok) {
+      audit({ ts: new Date().toISOString(), event: "block", tool: "confirm", category, reason: body.slice(0, 120) });
+      return false; // user denied → keep blocked
+    }
     unrecordBlock(category);
+    audit({ ts: new Date().toISOString(), event: "allow", tool: "confirm", category, reason: "user allowed" });
     return true; // user allowed → proceed
   };
 
@@ -283,6 +317,12 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     }
   };
 
+  const checkSensitive = (path: string): { matched: boolean; category: string } => {
+    const fullPath = resolvePath(state.cwdFallback ?? process.cwd(), path);
+    const res = checkPathSensitivityExtended(fullPath, state.config.allow, state.config.block);
+    return { matched: res.matched, category: res.category || "Sensitive" };
+  };
+
   // ──────────────────────────────────────────────────────────────────────────
   // Read guard
   // ──────────────────────────────────────────────────────────────────────────
@@ -291,8 +331,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     path: string,
     ctx: ExtensionContext
   ): Promise<ToolCallResult> => {
-    const fullPath = resolvePath(ctx.cwd, path);
-    const check = checkPathSensitivity(fullPath);
+    const check = checkSensitive(path);
 
     if (!check.matched) return {};
     if (state.mode !== "max") return {}; // basic and off: allow reads
@@ -300,17 +339,19 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     const ok = await confirmBlock(
       ctx,
       "⚠️ Sensitive File Access",
-      `leakguard: attempt to read sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\nPattern: ${check.pattern!.name}\n\nAllow this read?`,
-      check.pattern!.category
+      `leakguard: attempt to read sensitive file:\n\n  ${path}\n\nCategory: ${check.category}\n\nAllow this read?`,
+      check.category
     );
 
     if (!ok) {
       return {
         block: true,
-        reason: `Blocked by ${EXTENSION_NAME}: read of sensitive path '${path}' (${check.pattern!.category})`,
+        reason: `Blocked by ${EXTENSION_NAME}: read of sensitive path '${path}' (${check.category})`,
       };
     }
 
+    // Taint tracking: remember sensitive reads
+    state.taintedPaths.add(resolvePath(ctx.cwd, path));
     return {};
   };
 
@@ -322,8 +363,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     path: string,
     ctx: ExtensionContext
   ): Promise<ToolCallResult> => {
-    const fullPath = resolvePath(ctx.cwd, path);
-    const check = checkPathSensitivity(fullPath);
+    const check = checkSensitive(path);
 
     if (!check.matched) return {};
     if (state.mode !== "max") return {};
@@ -331,14 +371,14 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     const ok = await confirmBlock(
       ctx,
       "⚠️ Sensitive File Write",
-      `leakguard: attempt to write to sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\n\nAllow this write?`,
-      check.pattern!.category
+      `leakguard: attempt to write to sensitive file:\n\n  ${path}\n\nCategory: ${check.category}\n\nAllow this write?`,
+      check.category
     );
 
     if (!ok) {
       return {
         block: true,
-        reason: `Blocked by ${EXTENSION_NAME}: write to sensitive path '${path}' (${check.pattern!.category})`,
+        reason: `Blocked by ${EXTENSION_NAME}: write to sensitive path '${path}' (${check.category})`,
       };
     }
     return {};
@@ -354,19 +394,49 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
   ): Promise<ToolCallResult> => {
     const commandName = getShellCommandName(input.command);
 
+    // Pre-commit/push secret scan (last line of defense)
+    const gitPublish = detectGitPublish(input.command);
+    if (gitPublish && state.mode === "max") {
+      // Scan staged + working diff for secrets
+      let diff = "";
+      try {
+        diff = execSync("git diff --cached -- . ':(exclude).env*' 2>/dev/null; git diff -- . ':(exclude).env*' 2>/dev/null", {
+          cwd: ctx.cwd,
+          encoding: "utf8",
+          maxBuffer: 5 * 1024 * 1024,
+        });
+      } catch {
+        diff = "";
+      }
+      const found = scanForSecrets(diff, state.config.secretPatterns);
+      if (found.length > 0) {
+        const ok = await confirmBlock(
+          ctx,
+          "⚠️ Secret in Git Diff",
+          `leakguard: ${gitPublish} would publish content containing possible secret(s):\n\n  ${found.join(", ")}\n\nAllow anyway?`,
+          "Git Secret"
+        );
+        if (!ok) {
+          return {
+            block: true,
+            reason: `Blocked by ${EXTENSION_NAME}: ${gitPublish} contains secret-like material (${found.join(", ")})`,
+          };
+        }
+      }
+    }
+
     // Check reads
     if (FILE_READ_COMMANDS.has(commandName) && state.mode === "max") {
       const paths = extractPathsFromCommand(input.command);
       for (const p of paths) {
-        const fullPath = resolvePath(ctx.cwd, p);
-        const check = checkPathSensitivity(fullPath);
+        const check = checkSensitive(p);
         if (!check.matched) continue;
 
-        recordBlock(check.pattern!.category);
-
-        const ok = await ctx.ui.confirm(
+        const ok = await confirmBlock(
+          ctx,
           "⚠️ Sensitive File Access via Shell",
-          `leakguard: blocked ${commandName} on sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`
+          `leakguard: ${commandName} on sensitive file:\n\n  ${p}\n\nCategory: ${check.category}\n\nAllow?`,
+          check.category
         );
 
         if (!ok) {
@@ -375,8 +445,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
             reason: `Blocked by ${EXTENSION_NAME}: shell command '${commandName}' reads sensitive path '${p}'`,
           };
         }
-
-        unrecordBlock(check.pattern!.category);
+        state.taintedPaths.add(resolvePath(ctx.cwd, p));
       }
     }
 
@@ -384,15 +453,14 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     if (FILE_WRITE_COMMANDS.has(commandName) && state.mode === "max") {
       const paths = extractPathsFromCommand(input.command);
       for (const p of paths) {
-        const fullPath = resolvePath(ctx.cwd, p);
-        const check = checkPathSensitivity(fullPath);
+        const check = checkSensitive(p);
         if (!check.matched) continue;
 
         const ok = await confirmBlock(
           ctx,
           "⚠️ Sensitive File Write via Shell",
-          `leakguard: ${commandName} attempts to write to sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
-          check.pattern!.category
+          `leakguard: ${commandName} writes to sensitive file:\n\n  ${p}\n\nCategory: ${check.category}\n\nAllow?`,
+          check.category
         );
         if (!ok) {
           return {
@@ -409,15 +477,14 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       for (const p of paths) {
         if (p === "-rf" || p === "-f" || p === "-r" || p === "-fr") continue;
 
-        const fullPath = resolvePath(ctx.cwd, p);
-        const check = checkPathSensitivity(fullPath);
+        const check = checkSensitive(p);
         if (!check.matched) continue;
 
         const ok = await confirmBlock(
           ctx,
           "⚠️ Sensitive File Delete",
-          `leakguard: ${commandName} attempts to delete sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
-          check.pattern!.category
+          `leakguard: ${commandName} deletes sensitive file:\n\n  ${p}\n\nCategory: ${check.category}\n\nAllow?`,
+          check.category
         );
         if (!ok) {
           return {
@@ -428,29 +495,25 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       }
     }
 
-    // --- Ported + 2026 security layers ---
-    // Obfuscation (max only)
+    // --- 2026 security layers ---
     const obfuscation = checkObfuscation(input.command);
     if (obfuscation && state.mode === "max") {
       const ok = await confirmBlock(ctx, "⚠️ Obfuscated Command", `leakguard: ${obfuscation}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Obfuscation");
       if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${obfuscation}` };
     }
 
-    // Egress DLP (2026): secret in network egress
     const egress = checkEgressSecrets(input.command);
     if (egress) {
       const ok = await confirmBlock(ctx, "⚠️ Egress DLP", `leakguard: ${egress}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Egress DLP");
       if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${egress}` };
     }
 
-    // Env-dump / sensitive expansion / transform-smuggle / discovery-exfil
     const exfil = checkBashExfil(input.command);
     if (exfil && (state.mode === "max" || exfil.includes("secret") || exfil.includes("environment"))) {
       const ok = await confirmBlock(ctx, "⚠️ Exfiltration Risk", `leakguard: ${exfil}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Exfiltration");
       if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${exfil}` };
     }
 
-    // Critical utilities / sensitive path references in args
     const words = checkBashWords(input.command, ctx.cwd, state.mode);
     if (words && state.mode === "max") {
       const ok = await confirmBlock(ctx, "⚠️ Risky Command", `leakguard: ${words}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Command Scan");
@@ -476,7 +539,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       if (block.type !== "text") return block;
       const textBlock = block as { type: "text"; text: string };
 
-      const result = redactSecretsInText(textBlock.text, state.stats);
+      const result = redactSecretsInText(textBlock.text, state.stats, state.config.secretPatterns);
       if (result.count > 0) {
         totalRedacted += result.count;
         contentChanged = true;
@@ -487,6 +550,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
 
     if (contentChanged) {
       state.stats.redactedSecrets += totalRedacted;
+      audit({ ts: new Date().toISOString(), event: "redact", tool: event.toolName, count: totalRedacted });
       return {
         content: newContent,
         details: { ...(event.details as Record<string, unknown> | undefined ?? {}), leakguardRedacted: totalRedacted },
@@ -496,12 +560,14 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     return undefined;
   };
 
+  // cwd fallback for checkSensitive (used before ctx available in some paths)
+  state.cwdFallback = process.cwd();
+
   // ──────────────────────────────────────────────────────────────────────────
   // Event handlers
   // ──────────────────────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
-    // Reset per-session stats but keep persisted mode
     state.stats = {
       blockedCalls: 0,
       redactedSecrets: 0,
@@ -509,6 +575,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       blockedByCategory: {},
       redactedByPattern: {},
     };
+    state.cwdFallback = ctx.cwd;
     updateStatus(ctx);
     notify(ctx, `🛡️ ${EXTENSION_NAME} loaded (mode: ${state.mode})`, "info");
   });
@@ -526,22 +593,12 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     }
 
     if (e.toolName === "read") {
-      const path = (e.input as ReadToolInput).path;
-      const result = await guardReadPath(path, ctx);
-      // Taint tracking (2026): remember sensitive reads so egress is blocked later
-      if (!result.block && state.mode === "max") {
-        const fullPath = resolvePath(ctx.cwd, path);
-        if (checkPathSensitivity(fullPath).matched) {
-          state.taintedPaths.add(fullPath);
-        }
-      }
-      return result;
+      return await guardReadPath((e.input as ReadToolInput).path, ctx);
     }
 
     if (e.toolName === "write" || e.toolName === "edit") {
       const writeResult = await guardWritePath((e.input as WriteToolInput).path, ctx);
       if (writeResult.block) return writeResult;
-      // Block writes whose payload contains secret-looking material
       if (state.mode === "max" && hasSecretMaterial(e.input)) {
         const ok = await confirmBlock(
           ctx,
@@ -556,7 +613,6 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
           };
         }
       }
-      // Taint egress: if writing tainted content to a non-sensitive path, block
       if (state.mode === "max" && isTaintedEgress(e.toolName, e.input, state.taintedPaths)) {
         const ok = await confirmBlock(
           ctx,
@@ -578,18 +634,18 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     if ((e.toolName === "grep" || e.toolName === "find" || e.toolName === "ls") && state.mode === "max") {
       const pathArg = (e.input as { path?: string }).path;
       if (pathArg) {
-        const check = checkPathSensitivity(resolvePath(ctx.cwd, pathArg));
+        const check = checkSensitive(pathArg);
         if (check.matched) {
           const ok = await confirmBlock(
             ctx,
             "⚠️ Sensitive Path Scan",
-            `leakguard: ${e.toolName} over sensitive path '${pathArg}' (${check.pattern!.category}).\n\nAllow?`,
-            check.pattern!.category
+            `leakguard: ${e.toolName} over sensitive path '${pathArg}' (${check.category}).\n\nAllow?`,
+            check.category
           );
           if (!ok) {
             return {
               block: true,
-              reason: `Blocked by ${EXTENSION_NAME}: ${e.toolName} over sensitive path '${pathArg}' (${check.pattern!.category})`,
+              reason: `Blocked by ${EXTENSION_NAME}: ${e.toolName} over sensitive path '${pathArg}' (${check.category})`,
             };
           }
         }
@@ -625,59 +681,56 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
   // Commands
   // ──────────────────────────────────────────────────────────────────────────
 
+  const handleCommand = async (args: string, ctx: ExtensionContext): Promise<void> => {
+    const trimmed = args.trim();
+
+    if (trimmed === "" || trimmed === "status") {
+      notify(ctx, formatStats(), "info");
+      return;
+    }
+
+    const modeMatch = trimmed.match(/^mode\s+(max|basic|off)$/i);
+    if (modeMatch) {
+      const newMode = modeMatch[1]!.toLowerCase() as Mode;
+      setMode(ctx, newMode);
+
+      const messages: Record<Mode, string> = {
+        max: `${getModeIcon("max")} ${EXTENSION_NAME}: MAX mode - blocks sensitive paths AND redacts secrets`,
+        basic: `${getModeIcon("basic")} ${EXTENSION_NAME}: BASIC mode - allows reads but still redacts secrets`,
+        off: `${getModeIcon("off")} ${EXTENSION_NAME}: OFF mode - all protection disabled (DANGEROUS)`,
+      };
+
+      notify(ctx, messages[newMode], newMode === "off" ? "warning" : "info");
+      return;
+    }
+
+    // YOLO: skip confirm prompts for this session (redaction still applies)
+    if (trimmed === "yolo" || trimmed === "yolo on") {
+      state.yolo = true;
+      notify(ctx, `🔥 ${EXTENSION_NAME}: YOLO mode ON - blocks will ask, but you can allow per-session. Redaction still active.`, "warning");
+      return;
+    }
+    if (trimmed === "yolo off") {
+      state.yolo = false;
+      notify(ctx, `🔒 ${EXTENSION_NAME}: YOLO mode OFF - confirm prompts restored.`, "info");
+      return;
+    }
+
+    // Help
+    notify(
+      ctx,
+      `${EXTENSION_NAME} commands:\n` +
+      `  /leakguard              - Show session statistics\n` +
+      `  /leakguard mode max     - Block sensitive paths AND redact secrets\n` +
+      `  /leakguard mode basic   - Allow reads, still redact secrets\n` +
+      `  /leakguard mode off     - Disable all protection\n` +
+      `  /leakguard yolo         - Skip confirm prompts this session (redaction stays on)`,
+      "info"
+    );
+  };
+
   pi.registerCommand("leakguard", {
     description: `Manage ${EXTENSION_NAME} protection (current mode: ${state.mode})`,
-    handler: async (args, ctx) => {
-      const trimmed = args.trim();
-
-      if (trimmed === "" || trimmed === "status") {
-        notify(ctx, formatStats(), "info");
-        return;
-      }
-
-      const modeMatch = trimmed.match(/^mode\s+(max|basic|off)$/i);
-      if (modeMatch) {
-        const newMode = modeMatch[1]!.toLowerCase() as Mode;
-        setMode(ctx, newMode);
-
-        const messages: Record<Mode, string> = {
-          max: `${getModeIcon("max")} ${EXTENSION_NAME}: MAX mode - blocks sensitive paths AND redacts secrets`,
-          basic: `${getModeIcon("basic")} ${EXTENSION_NAME}: BASIC mode - allows reads but still redacts secrets`,
-          off: `${getModeIcon("off")} ${EXTENSION_NAME}: OFF mode - all protection disabled (DANGEROUS)`,
-        };
-
-        notify(ctx, messages[newMode], newMode === "off" ? "warning" : "info");
-        return;
-      }
-
-      // YOLO: skip confirm prompts for this session (redaction still applies)
-      if (trimmed === "yolo" || trimmed === "yolo on") {
-        state.yolo = true;
-        notify(ctx, `🔥 ${EXTENSION_NAME}: YOLO mode ON - blocks will ask, but you can allow per-session. Redaction still active.`, "warning");
-        return;
-      }
-      if (trimmed === "yolo off") {
-        state.yolo = false;
-        notify(ctx, `🔒 ${EXTENSION_NAME}: YOLO mode OFF - confirm prompts restored.`, "info");
-        return;
-      }
-
-      // Help
-      notify(
-        ctx,
-        `${EXTENSION_NAME} commands:\n` +
-        `  /leakguard              - Show session statistics\n` +
-        `  /leakguard mode max     - Block sensitive paths AND redact secrets\n` +
-        `  /leakguard mode basic   - Allow reads, still redact secrets\n` +
-        `  /leakguard mode off     - Disable all protection\n` +
-        `  /leakguard yolo         - Skip confirm prompts this session (redaction stays on)`,
-        "info"
-      );
-    },
-  });
-
-  // Initial status set
-  pi.on("session_start", async (_event, ctx) => {
-    updateStatus(ctx);
+    handler: handleCommand,
   });
 }

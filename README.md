@@ -40,6 +40,9 @@ Each layer below is classified by what it does when it fires:
 | Write/edit payload scan | BLOCK (confirm) | Secret material in write body | Low | Medium — novel formats |
 | grep/find/ls guard | BLOCK (confirm) | These tools over sensitive paths | Low | Low |
 | Taint tracking | BLOCK (confirm) | Egress of content read from a sensitive path | Low — only after a sensitive read | Medium — indirect leaks (e.g. summarizing then pasting) |
+| Pre-commit/push scan | BLOCK (confirm) | Secret in `git diff` on commit/push | Low — scans diff, not whole tree | Medium — novel formats |
+| Audit log | WARN (log only) | Every block/redact/allow event | None — observability | None |
+| Extensible config | n/a | User allow/block paths + extra secret patterns | None — user-defined | None — user-defined |
 
 ### Why we do NOT detect prompt injection by pattern
 
