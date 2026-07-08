@@ -45,9 +45,12 @@ import type {
 import {
   checkBashExfil,
   checkBashWords,
+  checkEgressSecrets,
   checkObfuscation,
   checkPathSensitivity,
+  detectInjection,
   hasSecretMaterial,
+  isTaintedEgress,
   redactSecretsInText,
   resolvePath,
   type RedactStats,
@@ -68,6 +71,8 @@ interface SessionStats extends RedactStats {
 
 interface ExtensionState {
   mode: Mode;
+  yolo: boolean;
+  taintedPaths: Set<string>;
   stats: SessionStats;
 }
 
@@ -184,6 +189,8 @@ function saveConfig(mode: Mode): void {
 export default function noleaksPersonal(pi: ExtensionAPI): void {
   const state: ExtensionState = {
     mode: loadConfig(),
+    yolo: false,
+    taintedPaths: new Set<string>(),
     stats: {
       blockedCalls: 0,
       redactedSecrets: 0,
@@ -211,6 +218,25 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
     state.mode = newMode;
     saveConfig(newMode);
     updateStatus(ctx);
+  };
+
+  /**
+   * Ask the user before blocking. In YOLO mode, never blocks (but redaction
+   * still applies at tool_result). This keeps the agent useful: the user
+   * decides per-session whether to allow sensitive operations.
+   */
+  const confirmBlock = async (
+    ctx: ExtensionContext,
+    title: string,
+    body: string,
+    category: string
+  ): Promise<boolean> => {
+    if (state.yolo) return true; // YOLO: allow without asking
+    recordBlock(category);
+    const ok = await ctx.ui.confirm(title, body);
+    if (!ok) return false; // user denied → keep blocked
+    unrecordBlock(category);
+    return true; // user allowed → proceed
   };
 
   const formatStats = (): string => {
@@ -272,11 +298,11 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
     if (!check.matched) return {};
     if (state.mode !== "max") return {}; // basic and off: allow reads
 
-    recordBlock(check.pattern!.category);
-
-    const ok = await ctx.ui.confirm(
+    const ok = await confirmBlock(
+      ctx,
       "⚠️ Sensitive File Access",
-      `noleaks: blocked attempt to read sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\nPattern: ${check.pattern!.name}\n\nAllow this read?`
+      `noleaks: attempt to read sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\nPattern: ${check.pattern!.name}\n\nAllow this read?`,
+      check.pattern!.category
     );
 
     if (!ok) {
@@ -286,8 +312,6 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
       };
     }
 
-    // User allowed - don't count as blocked
-    unrecordBlock(check.pattern!.category);
     return {};
   };
 
@@ -295,23 +319,30 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
   // Write guard (max mode only)
   // ──────────────────────────────────────────────────────────────────────────
 
-  const guardWritePath = (
+  const guardWritePath = async (
     path: string,
     ctx: ExtensionContext
-  ): ToolCallResult => {
+  ): Promise<ToolCallResult> => {
     const fullPath = resolvePath(ctx.cwd, path);
     const check = checkPathSensitivity(fullPath);
 
     if (!check.matched) return {};
     if (state.mode !== "max") return {};
 
-    recordBlock(check.pattern!.category);
-    notify(ctx, `⚠️ Blocked write to sensitive file: ${path}`, "error");
+    const ok = await confirmBlock(
+      ctx,
+      "⚠️ Sensitive File Write",
+      `noleaks: attempt to write to sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\n\nAllow this write?`,
+      check.pattern!.category
+    );
 
-    return {
-      block: true,
-      reason: `Blocked by ${EXTENSION_NAME}: write to sensitive path '${path}' (${check.pattern!.category})`,
-    };
+    if (!ok) {
+      return {
+        block: true,
+        reason: `Blocked by ${EXTENSION_NAME}: write to sensitive path '${path}' (${check.pattern!.category})`,
+      };
+    }
+    return {};
   };
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -358,13 +389,18 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         const check = checkPathSensitivity(fullPath);
         if (!check.matched) continue;
 
-        recordBlock(check.pattern!.category);
-        notify(ctx, `⚠️ Blocked write to sensitive file via shell: ${p}`, "error");
-
-        return {
-          block: true,
-          reason: `Blocked by ${EXTENSION_NAME}: shell command '${commandName}' writes to sensitive path '${p}'`,
-        };
+        const ok = await confirmBlock(
+          ctx,
+          "⚠️ Sensitive File Write via Shell",
+          `noleaks: ${commandName} attempts to write to sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
+          check.pattern!.category
+        );
+        if (!ok) {
+          return {
+            block: true,
+            reason: `Blocked by ${EXTENSION_NAME}: shell command '${commandName}' writes to sensitive path '${p}'`,
+          };
+        }
       }
     }
 
@@ -378,33 +414,48 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         const check = checkPathSensitivity(fullPath);
         if (!check.matched) continue;
 
-        recordBlock(check.pattern!.category);
-        notify(ctx, `⚠️ Blocked delete of sensitive file: ${p}`, "error");
-
-        return {
-          block: true,
-          reason: `Blocked by ${EXTENSION_NAME}: shell command '${commandName}' deletes sensitive path '${p}'`,
-        };
+        const ok = await confirmBlock(
+          ctx,
+          "⚠️ Sensitive File Delete",
+          `noleaks: ${commandName} attempts to delete sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
+          check.pattern!.category
+        );
+        if (!ok) {
+          return {
+            block: true,
+            reason: `Blocked by ${EXTENSION_NAME}: shell command '${commandName}' deletes sensitive path '${p}'`,
+          };
+        }
       }
     }
 
-    // --- Ported security layers (apply in max and basic for obfuscation/exfil) ---
+    // --- Ported + 2026 security layers ---
+    // Obfuscation (max only)
     const obfuscation = checkObfuscation(input.command);
     if (obfuscation && state.mode === "max") {
-      recordBlock("Obfuscation");
-      return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${obfuscation}` };
+      const ok = await confirmBlock(ctx, "⚠️ Obfuscated Command", `noleaks: ${obfuscation}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Obfuscation");
+      if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${obfuscation}` };
     }
 
+    // Egress DLP (2026): secret in network egress
+    const egress = checkEgressSecrets(input.command);
+    if (egress) {
+      const ok = await confirmBlock(ctx, "⚠️ Egress DLP", `noleaks: ${egress}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Egress DLP");
+      if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${egress}` };
+    }
+
+    // Env-dump / sensitive expansion / transform-smuggle / discovery-exfil
     const exfil = checkBashExfil(input.command);
     if (exfil && (state.mode === "max" || exfil.includes("secret") || exfil.includes("environment"))) {
-      recordBlock("Exfiltration");
-      return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${exfil}` };
+      const ok = await confirmBlock(ctx, "⚠️ Exfiltration Risk", `noleaks: ${exfil}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Exfiltration");
+      if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${exfil}` };
     }
 
+    // Critical utilities / sensitive path references in args
     const words = checkBashWords(input.command, ctx.cwd, state.mode);
     if (words && state.mode === "max") {
-      recordBlock("Command Scan");
-      return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${words}` };
+      const ok = await confirmBlock(ctx, "⚠️ Risky Command", `noleaks: ${words}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Command Scan");
+      if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${words}` };
     }
 
     return {};
@@ -476,43 +527,87 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
     }
 
     if (e.toolName === "read") {
-      return await guardReadPath((e.input as ReadToolInput).path, ctx);
+      const path = (e.input as ReadToolInput).path;
+      const result = await guardReadPath(path, ctx);
+      // Taint tracking (2026): remember sensitive reads so egress is blocked later
+      if (!result.block && state.mode === "max") {
+        const fullPath = resolvePath(ctx.cwd, path);
+        if (checkPathSensitivity(fullPath).matched) {
+          state.taintedPaths.add(fullPath);
+        }
+      }
+      return result;
     }
 
     if (e.toolName === "write" || e.toolName === "edit") {
-      const writeResult = guardWritePath((e.input as WriteToolInput).path, ctx);
+      const writeResult = await guardWritePath((e.input as WriteToolInput).path, ctx);
       if (writeResult.block) return writeResult;
-      // Ported: block writes whose payload contains secret-looking material
+      // Block writes whose payload contains secret-looking material
       if (state.mode === "max" && hasSecretMaterial(e.input)) {
-        recordBlock("Secret Payload");
-        notify(ctx, "⚠️ Blocked write/edit containing secret-looking material", "error");
-        return {
-          block: true,
-          reason: `Blocked by ${EXTENSION_NAME}: write/edit payload contains secret-looking material`,
-        };
+        const ok = await confirmBlock(
+          ctx,
+          "⚠️ Secret in Write Payload",
+          "noleaks: write/edit payload contains secret-looking material.\n\nAllow this write?",
+          "Secret Payload"
+        );
+        if (!ok) {
+          return {
+            block: true,
+            reason: `Blocked by ${EXTENSION_NAME}: write/edit payload contains secret-looking material`,
+          };
+        }
+      }
+      // Taint egress: if writing tainted content to a non-sensitive path, block
+      if (state.mode === "max" && isTaintedEgress(e.toolName, e.input, state.taintedPaths)) {
+        const ok = await confirmBlock(
+          ctx,
+          "⚠️ Tainted Egress",
+          "noleaks: write references content previously read from a sensitive path.\n\nAllow this write?",
+          "Taint Egress"
+        );
+        if (!ok) {
+          return {
+            block: true,
+            reason: `Blocked by ${EXTENSION_NAME}: write references tainted sensitive content`,
+          };
+        }
       }
       return writeResult;
     }
 
-    // Ported: grep / find / ls guards over sensitive paths (max mode)
+    // grep / find / ls guards over sensitive paths (max mode)
     if ((e.toolName === "grep" || e.toolName === "find" || e.toolName === "ls") && state.mode === "max") {
       const pathArg = (e.input as { path?: string }).path;
       if (pathArg) {
         const check = checkPathSensitivity(resolvePath(ctx.cwd, pathArg));
         if (check.matched) {
-          recordBlock(check.pattern!.category);
-          return {
-            block: true,
-            reason: `Blocked by ${EXTENSION_NAME}: ${e.toolName} over sensitive path '${pathArg}' (${check.pattern!.category})`,
-          };
+          const ok = await confirmBlock(
+            ctx,
+            "⚠️ Sensitive Path Scan",
+            `noleaks: ${e.toolName} over sensitive path '${pathArg}' (${check.pattern!.category}).\n\nAllow?`,
+            check.pattern!.category
+          );
+          if (!ok) {
+            return {
+              block: true,
+              reason: `Blocked by ${EXTENSION_NAME}: ${e.toolName} over sensitive path '${pathArg}' (${check.pattern!.category})`,
+            };
+          }
         }
       }
       if (hasSecretMaterial(e.input)) {
-        recordBlock("Secret Payload");
-        return {
-          block: true,
-          reason: `Blocked by ${EXTENSION_NAME}: ${e.toolName} payload references secret-looking material`,
-        };
+        const ok = await confirmBlock(
+          ctx,
+          "⚠️ Secret in Query",
+          `noleaks: ${e.toolName} payload references secret-looking material.\n\nAllow?`,
+          "Secret Payload"
+        );
+        if (!ok) {
+          return {
+            block: true,
+            reason: `Blocked by ${EXTENSION_NAME}: ${e.toolName} payload references secret-looking material`,
+          };
+        }
       }
     }
 
@@ -520,11 +615,35 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    const result = redactToolResult(event as ToolResultEvent);
-    if (result && state.mode === "max" && ((result.details?.noleaksRedacted as number) ?? 0) > 0) {
-      notify(ctx, `🛡️ noleaks: redacted ${(result.details?.noleaksRedacted as number) ?? 0} secret(s) from ${event.toolName} output`, "info");
+    const e = event as ToolResultEvent;
+
+    // Injection detection (2026): scan tool results for embedded injection attempts
+    if (state.mode !== "off" && e.content && Array.isArray(e.content)) {
+      for (const block of e.content) {
+        if (block.type !== "text") continue;
+        const textBlock = block as { type: "text"; text: string };
+        const inj = detectInjection(textBlock.text);
+        if (inj.high.length > 0) {
+          notify(
+            ctx,
+            `🚨 noleaks: potential prompt-injection in ${e.toolName} output [${inj.high.join(", ")}]. Review before trusting.`,
+            "warning"
+          );
+        } else if (inj.low.length > 0 && !state.yolo) {
+          notify(
+            ctx,
+            `⚠️ noleaks: suspicious phrasing in ${e.toolName} output [${inj.low.join(", ")}]. Possible injection.`,
+            "info"
+          );
+        }
+      }
     }
-    return result as { content?: typeof event.content; details?: unknown } | undefined;
+
+    const result = redactToolResult(e);
+    if (result && state.mode === "max" && ((result.details?.noleaksRedacted as number) ?? 0) > 0) {
+      notify(ctx, `🛡️ noleaks: redacted ${(result.details?.noleaksRedacted as number) ?? 0} secret(s) from ${e.toolName} output`, "info");
+    }
+    return result as { content?: typeof e.content; details?: unknown } | undefined;
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -556,6 +675,18 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         return;
       }
 
+      // YOLO: skip confirm prompts for this session (redaction still applies)
+      if (trimmed === "yolo" || trimmed === "yolo on") {
+        state.yolo = true;
+        notify(ctx, `🔥 ${EXTENSION_NAME}: YOLO mode ON - blocks will ask, but you can allow per-session. Redaction still active.`, "warning");
+        return;
+      }
+      if (trimmed === "yolo off") {
+        state.yolo = false;
+        notify(ctx, `🔒 ${EXTENSION_NAME}: YOLO mode OFF - confirm prompts restored.`, "info");
+        return;
+      }
+
       // Help
       notify(
         ctx,
@@ -563,7 +694,8 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         `  /noleaks              - Show session statistics\n` +
         `  /noleaks mode max     - Block sensitive paths AND redact secrets\n` +
         `  /noleaks mode basic   - Allow reads, still redact secrets\n` +
-        `  /noleaks mode off     - Disable all protection`,
+        `  /noleaks mode off     - Disable all protection\n` +
+        `  /noleaks yolo         - Skip confirm prompts this session (redaction stays on)`,
         "info"
       );
     },
