@@ -1,32 +1,32 @@
 # pi-leakguard
 
-Personal **leakguard** extension for [pi.dev](https://pi.dev) — a defense-in-depth
-"seatbelt" that blocks the LLM from reading/writing/exfiltrating credentials and
+I built this **leakguard** extension for [pi.dev](https://pi.dev) as a defense-in-depth
+"seatbelt" that keeps my coding agent from reading/writing/exfiltrating my credentials, and
 redacts secrets from tool output before the model ever sees them.
 
-> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha, published on npm/pi.dev). This project
-> keeps the original's security layers and adds a richer redaction set, interactive
+> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha, published on npm/pi.dev). I kept that
+> project's original security layers and added a richer redaction set, interactive
 > confirmation on every block, detailed session stats, and mode persistence.
 > Credit for the core bash-security logic (symlink guard, obfuscation detection,
 > env-dump/sensitive-expansion blocks, transform-smuggle, discovery/exfil combine,
 > universal word scan, write-payload scan, grep/find/ls guards, and `leakguard.json`
-> persistence) goes to that project.
+> persistence) goes to raquezha.
 >
-> **Note:** this is an independent continuation of `@raquezha/noleaks`' ideas and security
-> layers, not an official fork. The MIT license and attribution are retained.
+> **Note:** this is my independent continuation of `@raquezha/noleaks`' ideas and security
+> layers, not an official fork. I kept the MIT license and attribution.
 
-> **Security model:** `leakguard` is a powerful defense-in-depth
-> "seatbelt", **not** an airtight sandbox. It prevents accidental leaks and stops
-> common AI exfiltration techniques. For untrusted code or unattended automation,
-> always use a real sandbox (Docker, Micro-VM).
+> **Security model:** this is a powerful defense-in-depth
+> "seatbelt", **not** an airtight sandbox. It stops accidental leaks and common AI
+> exfiltration tricks. For untrusted code or unattended automation, use a real sandbox
+> (Docker, Micro-VM) — don't rely on this alone.
 
 ## Security model & limitations
 
-Each layer below is classified by what it does when it fires:
+When a layer fires, here's what happens:
 
-- **BLOCK** — the tool call is stopped (unless you allow it via the confirm prompt or `/leakguard yolo`).
-- **REDACT** — secret text is replaced before the model sees it; the agent still knows a secret *exists*, just not its value.
-- **WARN** — a notification is shown; nothing is blocked.
+- **BLOCK** — I stop the tool call (unless you allow it via the confirm prompt or `/leakguard yolo`).
+- **REDACT** — I replace the secret text before the model sees it; the agent still knows a secret *exists*, just not its value.
+- **WARN** — I show a notification; I don't block anything.
 
 | Layer | Action | What it catches | False-positive risk | False-negative risk |
 | ----- | ------ | --------------- | ------------------ | ------------------ |
@@ -44,35 +44,33 @@ Each layer below is classified by what it does when it fires:
 | Audit log | WARN (log only) | Every block/redact/allow event | None — observability | None |
 | Extensible config | n/a | User allow/block paths + extra secret patterns | None — user-defined | None — user-defined |
 
-### Why we do NOT detect prompt injection by pattern
+### Why I don't try to detect prompt injection by pattern
 
-Prompt-injection detection by regex/heuristics is **not a consolidated
+Detecting prompt injection with regex/heuristics is **not a consolidated
 industry strategy**. Attackers write injections in endless variations
 (obfuscation, other languages, indirect phrasing like "the previous
-instructions are deprecated"), so a fixed pattern list has a **very high
-false-negative rate** and produces false positives on legitimate prose
-("ignore the previous section"). The cost of maintaining it outweighs the
-value it delivers.
+instructions are deprecated"), so a fixed pattern list misses almost everything
+and false-positives on normal prose ("ignore the previous section"). Maintaining
+that list costs more than it's worth.
 
-Instead, `leakguard` prevents the **harm** of an injection, not the injection
-itself:
+So instead of trying to *catch* the injection, I stop the **harm** it causes:
 
-- Even if the model is tricked into reading a secret, **redaction** strips it
-  from what the model can see and repeat.
-- Even if the model is tricked into exfiltrating, **egress DLP** and **taint
+- If the model gets tricked into reading a secret, **redaction** strips it
+  from what it can see and repeat.
+- If it gets tricked into exfiltrating, **egress DLP** and **taint
   tracking** block the network call carrying credentials.
 
-Treat `leakguard` as reducing blast radius, not as a detector.
+Think of leakguard as shrinking the blast radius, not as a detector.
 
-### How false positives / false negatives are mitigated
+### How I keep false positives / false negatives in check
 
-- **Confirm, not silent block.** Every BLOCK asks you via `ctx.ui.confirm`
-  (unless `/leakguard yolo`). The agent is never silently disabled — you
+- **I confirm, I don't silently block.** Every BLOCK asks you via `ctx.ui.confirm`
+  (unless you run `/leakguard yolo`). I never silently disable the agent — you
   decide per case. This keeps the agent useful while still safe.
 - **Conservative patterns.** Path and redaction patterns target specific
   file names and known secret prefixes; they avoid matching normal code.
 - **YOLO mode** disables confirm prompts for a session but keeps REDACT on,
-  so secrets still never reach the chat even when blocks are skipped.
+  so secrets still never reach the chat even when I skip blocks.
 - **Redaction over blocking for output.** Scrubbing secrets from output
   preserves agent utility (deploy still works via the environment) while
   preventing leakage — the preferred 2026 pattern of "don't give agents
@@ -80,22 +78,22 @@ Treat `leakguard` as reducing blast radius, not as a detector.
 
 ## Features
 
-- **Path protection**: blocks reads/writes/deletes of sensitive paths
+- **Path protection**: I block reads/writes/deletes of sensitive paths
   (`.env`, `~/.ssh/`, `~/.aws/`, `/etc/shadow`, Keychains, etc.)
-- **Secret redaction**: scrubs API keys, tokens, passwords, private-key blocks,
+- **Secret redaction**: I scrub API keys, tokens, passwords, private-key blocks,
   DB URLs, and secret assignments from `tool_result` content.
-- **Symlink guard**: paths are resolved to their *real* on-disk location before
-  checks, so symlink bypasses are caught.
-- **Obfuscation detection**: NFKC normalization variance and hidden/control
-  characters (homoglyph / zero-width attacks) are rejected.
-- **Shell exfiltration blocks**: env dumps (`env`/`printenv`/`set`/`export`),
+- **Symlink guard**: I resolve paths to their *real* on-disk location before
+  checking, so symlink bypasses are caught.
+- **Obfuscation detection**: I reject NFKC normalization variance and hidden/control
+  characters (homoglyph / zero-width attacks).
+- **Shell exfiltration blocks**: I block env dumps (`env`/`printenv`/`set`/`export`),
   sensitive variable expansion (`$TOKEN`), transform+smuggle (`base64`/`openssl`
   piping secrets), and discovery/exfil combine (`nmap`/`curl` + secrets).
-- **Universal word scan**: critical utilities blocked even as nested arguments
+- **Universal word scan**: I block critical utilities even as nested arguments
   (`sudo chmod`, `dd`, `shred`, `mkfs`, ...).
-- **Write/edit payload scan**: writes whose body contains secret-looking
-  material are blocked.
-- **grep / find / ls guards**: those tools are blocked over sensitive paths in
+- **Write/edit payload scan**: I block writes whose body contains secret-looking
+  material.
+- **grep / find / ls guards**: I block those tools over sensitive paths in
   `max` mode.
 - **Three modes** (persisted to `~/.pi/agent/leakguard.json`):
   - `max` (default) — block sensitive paths AND redact secrets
