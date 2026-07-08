@@ -1,11 +1,11 @@
 # Changelog
 
-All notable changes to `pi-noleaks-personal` are documented here.
+All notable changes to `pi-leakguard` are documented here.
 
 ## [1.0.0] - 2026-07-02
 
 ### Added
-- Initial personal fork of [`@raquezha/noleaks`](https://pi.dev/packages/@raquezha/noleaks).
+- Initial project, inspired by [`@raquezha/noleaks`](https://pi.dev/packages/@raquezha/noleaks) (now removed from GitHub/npm; independent continuation, MIT attribution retained).
 - All security layers from the original, ported and tested:
   - Symlink guard (`realpathSync` before path checks).
   - Obfuscation detection (NFKC normalization variance + hidden/control chars).

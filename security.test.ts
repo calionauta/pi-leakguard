@@ -1,5 +1,5 @@
 /**
- * Tests for noleaks-personal security helpers.
+ * Tests for leakguard security helpers.
  * Run with: node --test --experimental-strip-types security.test.ts
  * (or: npx tsx --test security.test.ts)
  */
@@ -268,7 +268,7 @@ test("checkEgressSecrets blocks secret-bearing headers", () => {
 });
 
 test("checkEgressSecrets allows safe network commands (no FP)", () => {
-  assert.equal(checkEgressSecrets("curl https://api.github.com/repos/calionauta/pi-noleaks-personal"), undefined);
+  assert.equal(checkEgressSecrets("curl https://api.github.com/repos/calionauta/pi-leakguard"), undefined);
   assert.equal(checkEgressSecrets("curl -X POST https://hooks.slack.com/services/T0/B1/XX"), undefined);
   assert.equal(checkEgressSecrets("python3 script.py"), undefined);
   assert.equal(checkEgressSecrets("ssh user@host"), undefined);

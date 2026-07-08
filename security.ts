@@ -1,5 +1,5 @@
 /**
- * security.ts - Pure, testable security helpers for noleaks-personal.
+ * security.ts - Pure, testable security helpers for leakguard.
  *
  * Inspired by [@raquezha/noleaks](https://pi.dev/packages/@raquezha/noleaks).
  * These functions have no pi/ExtensionAPI dependency so they can be unit-tested
