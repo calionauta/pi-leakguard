@@ -24,9 +24,9 @@ redacts secrets from tool output before the model ever sees them.
 
 When a layer fires, here's what happens:
 
-- **BLOCK** — I stop the tool call (unless you allow it via the confirm prompt or `/leakguard yolo`).
-- **REDACT** — I replace the secret text before the model sees it; the agent still knows a secret *exists*, just not its value.
-- **WARN** — I show a notification; I don't block anything.
+- **BLOCK** — leakguard stops the tool call (unless you allow it via the confirm prompt or `/leakguard yolo`).
+- **REDACT** — leakguard replaces the secret text before the model sees it; the agent still knows a secret *exists*, just not its value.
+- **WARN** — leakguard shows a notification; it doesn't block anything.
 
 | Layer | Action | What it catches | False-positive risk | False-negative risk |
 | ----- | ------ | --------------- | ------------------ | ------------------ |
@@ -67,33 +67,33 @@ Think of leakguard as shrinking the blast radius, not as a detector.
 - **I confirm, I don't silently block.** Every BLOCK asks you via `ctx.ui.confirm`
   (unless you run `/leakguard yolo`). I never silently disable the agent — you
   decide per case. This keeps the agent useful while still safe.
-- **Conservative patterns.** Path and redaction patterns target specific
+- **Conservative patterns.** leakguard's path and redaction patterns target specific
   file names and known secret prefixes; they avoid matching normal code.
 - **YOLO mode** disables confirm prompts for a session but keeps REDACT on,
   so secrets still never reach the chat even when I skip blocks.
-- **Redaction over blocking for output.** Scrubbing secrets from output
-  preserves agent utility (deploy still works via the environment) while
-  preventing leakage — the preferred 2026 pattern of "don't give agents
-  secrets".
+- **Redaction over blocking for output.** leakguard scrubs secrets from output
+  instead of blocking it, which preserves agent utility (deploy still works via
+  the environment) while preventing leakage — the preferred 2026 pattern of
+  "don't give agents secrets".
 
 ## Features
 
-- **Path protection**: I block reads/writes/deletes of sensitive paths
+- **Path protection**: leakguard blocks reads/writes/deletes of sensitive paths
   (`.env`, `~/.ssh/`, `~/.aws/`, `/etc/shadow`, Keychains, etc.)
-- **Secret redaction**: I scrub API keys, tokens, passwords, private-key blocks,
+- **Secret redaction**: leakguard scrubs API keys, tokens, passwords, private-key blocks,
   DB URLs, and secret assignments from `tool_result` content.
-- **Symlink guard**: I resolve paths to their *real* on-disk location before
+- **Symlink guard**: leakguard resolves paths to their *real* on-disk location before
   checking, so symlink bypasses are caught.
-- **Obfuscation detection**: I reject NFKC normalization variance and hidden/control
+- **Obfuscation detection**: leakguard rejects NFKC normalization variance and hidden/control
   characters (homoglyph / zero-width attacks).
-- **Shell exfiltration blocks**: I block env dumps (`env`/`printenv`/`set`/`export`),
+- **Shell exfiltration blocks**: leakguard blocks env dumps (`env`/`printenv`/`set`/`export`),
   sensitive variable expansion (`$TOKEN`), transform+smuggle (`base64`/`openssl`
   piping secrets), and discovery/exfil combine (`nmap`/`curl` + secrets).
-- **Universal word scan**: I block critical utilities even as nested arguments
+- **Universal word scan**: leakguard blocks critical utilities even as nested arguments
   (`sudo chmod`, `dd`, `shred`, `mkfs`, ...).
-- **Write/edit payload scan**: I block writes whose body contains secret-looking
+- **Write/edit payload scan**: leakguard blocks writes whose body contains secret-looking
   material.
-- **grep / find / ls guards**: I block those tools over sensitive paths in
+- **grep / find / ls guards**: leakguard blocks those tools over sensitive paths in
   `max` mode.
 - **Three modes** (persisted to `~/.pi/agent/leakguard.json`):
   - `max` (default) — block sensitive paths AND redact secrets
