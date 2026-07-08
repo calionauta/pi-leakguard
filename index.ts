@@ -263,7 +263,12 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       return true; // YOLO: allow without asking
     }
     recordBlock(category);
-    const ok = await ctx.ui.confirm(title, body);
+    // pi's ui.confirm() only supports Yes/No (Promise<boolean>). We can't
+    // add a third "yolo" button; instead, surface the yolo command in the
+    // body so the user discovers it in context. Runs ONCE per session — yolo
+    // remains session-only.
+    const hint = "\n\nTip: run `/leakguard yolo` to skip these prompts for this session (redaction stays on).";
+    const ok = await ctx.ui.confirm(title, body + hint);
     if (!ok) {
       audit({ ts: new Date().toISOString(), event: "block", tool: "confirm", category, reason: body.slice(0, 120) });
       return false; // user denied → keep blocked
