@@ -25,7 +25,7 @@ redacts secrets from tool output before the model ever sees them.
 When a layer fires, here's what happens:
 
 - **BLOCK** — leakguard stops the tool call (unless you allow it via the confirm prompt or `/leakguard yolo`).
-- **REDACT** — leakguard replaces the secret text before the model sees it; the agent still knows a secret *exists*, just not its value.
+- **REDACT** — leakguard replaces the secret text with `[LEAKGUARD_REDACTED]` before the model sees it; the agent still knows a secret *exists*, just not its value.
 - **WARN** — leakguard shows a notification; it doesn't block anything.
 
 | Layer | Action | What it catches | False-positive risk | False-negative risk |
@@ -77,6 +77,10 @@ Think of leakguard as shrinking the blast radius, not as a detector.
   instead of blocking it, which preserves agent utility (deploy still works via
   the environment) while preventing leakage — the preferred 2026 pattern of
   "don't give agents secrets".
+- **Context note.** Every redacted output gets a note explaining the redaction
+  and suggesting `/leakguard allow-once` if the value is needed. The model
+  understands it's security, not an error, and can ask the human for a one-time
+  bypass instead of wasting tokens on workarounds.
 
 ## Features
 
@@ -97,6 +101,8 @@ Think of leakguard as shrinking the blast radius, not as a detector.
   material.
 - **grep / find / ls guards**: leakguard blocks those tools over sensitive paths in
   `max` mode.
+- **allow-once**: bypass redaction for one value without changing the mode.
+  Human-only via confirm prompt — the LLM cannot trigger it.
 - **Three modes** (persisted to `~/.pi/agent/leakguard.json`):
   - `max` (default) — block sensitive paths AND redact secrets
   - `basic` — allow reads but still redact secrets (Safe Debugging)
@@ -132,6 +138,7 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 | `/leakguard mode basic`| Allow reads but still redact secrets          |
 | `/leakguard mode off`  | Disable all protection (dangerous)            |
 | `/leakguard yolo`      | Skip confirm prompts this session — session-only, resets on next session (redaction stays on) |
+| `/leakguard allow-once`| Allow one redacted value through without changing mode — single use, human-only via confirm |
 
 ## Installation (local)
 
@@ -146,7 +153,7 @@ pi install git:github.com/calionauta/pi-leakguard
 Or pin a version:
 
 ```bash
-pi install git:github.com/calionauta/pi-leakguard@v1.0.0
+pi install git:github.com/calionauta/pi-leakguard@v1.3.1
 ```
 
 ## Development
@@ -163,6 +170,7 @@ npm run typecheck # tsc --noEmit
 - 🟡 `basic` - redact only
 - 🔓 `off` - no protection
 - 🔥 appended when `/leakguard yolo` is on (confirm prompts skipped; redaction stays on). Session-only — disappears on next session start.
+- ⚡ appended when `/leakguard allow-once` is active — next redacted output will pass through (single use, resets automatically).
 
 ## License
 
