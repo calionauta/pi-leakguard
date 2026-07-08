@@ -2,7 +2,7 @@
 
 All notable changes to `pi-leakguard` are documented here.
 
-## [1.2.0] - 2026-07-08
+## [0.2.0] - 2026-07-08
 
 ### Added
 - `/leakguard trust <pattern>` — session-level allow-list for redaction bypass.
@@ -18,7 +18,7 @@ All notable changes to `pi-leakguard` are documented here.
 - 8 new tests: parseTrustedPattern (literal, regex, case-insensitive), trustedTest
   skip/isolation, informative placeholder (AWS key, JWT Token, safe text).
 
-## [1.0.0] - 2026-07-02
+## [0.1.0] - 2026-07-02
 
 ### Added
 - Initial project, inspired by [`@raquezha/noleaks`](https://pi.dev/packages/@raquezha/noleaks) (MIT, published on npm/pi.dev; independent continuation, MIT attribution retained).
