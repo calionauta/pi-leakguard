@@ -753,10 +753,10 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
         return;
       }
       const ok = await ctx.ui.confirm(
-        "⚡ Allow One Redacted Value?",
+        "⚡ Allow Once?",
         `${EXTENSION_NAME}: allow-once lets the next single redacted value pass through without redaction.\n\n` +
         "After that one pass, redaction resumes automatically — the mode stays unchanged.\n\n" +
-        "Allow one value to bypass redaction?"
+        "Allow this one value to bypass redaction?"
       );
       if (!ok) {
         notify(ctx, `🔒 ${EXTENSION_NAME}: allow-once cancelled.`, "info");
