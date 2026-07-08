@@ -16,7 +16,7 @@ All notable changes to `pi-leakguard` are documented here.
   - Universal word scan (critical utilities as nested arguments: `sudo chmod`, `dd`, `shred`).
   - Write/edit payload scan (`hasSecretMaterial`).
   - `grep`/`find`/`ls` guards over sensitive paths (max mode).
-  - Mode persistence via `~/.pi/agent/noleaks.json`.
+  - Mode persistence via `~/.pi/agent/leakguard.json`.
 - Richer redaction set: Vault (`hvs.`), Doppler (`dp.pt.`), 1Password (`op://`),
   Bearer tokens, DB URLs with credentials, plus the original's AWS/OpenAI/Anthropic/
   Google/GitHub/GitLab/Slack/Stripe/SendGrid/npm/JWT/private-key patterns.

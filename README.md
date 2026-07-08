@@ -1,6 +1,6 @@
 # pi-leakguard
 
-Personal **noleaks** extension for [pi.dev](https://pi.dev) — a defense-in-depth
+Personal **leakguard** extension for [pi.dev](https://pi.dev) — a defense-in-depth
 "seatbelt" that blocks the LLM from reading/writing/exfiltrating credentials and
 redacts secrets from tool output before the model ever sees them.
 
@@ -9,7 +9,7 @@ redacts secrets from tool output before the model ever sees them.
 > confirmation on every block, detailed session stats, and mode persistence.
 > Credit for the core bash-security logic (symlink guard, obfuscation detection,
 > env-dump/sensitive-expansion blocks, transform-smuggle, discovery/exfil combine,
-> universal word scan, write-payload scan, grep/find/ls guards, and `noleaks.json`
+> universal word scan, write-payload scan, grep/find/ls guards, and `leakguard.json`
 > persistence) goes to that project.
 >
 > **Note:** the original `@raquezha/noleaks` repository appears to have been
@@ -41,7 +41,7 @@ redacts secrets from tool output before the model ever sees them.
   material are blocked.
 - **grep / find / ls guards**: those tools are blocked over sensitive paths in
   `max` mode.
-- **Three modes** (persisted to `~/.pi/agent/noleaks.json`):
+- **Three modes** (persisted to `~/.pi/agent/leakguard.json`):
   - `max` (default) — block sensitive paths AND redact secrets
   - `basic` — allow reads but still redact secrets (Safe Debugging)
   - `off` — disable all protection (dangerous)
@@ -71,10 +71,10 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 
 | Command              | Description                                   |
 | -------------------- | --------------------------------------------- |
-| `/noleaks`           | Show session statistics (blocked, redacted)   |
-| `/noleaks mode max`  | Block sensitive paths AND redact secrets      |
-| `/noleaks mode basic`| Allow reads but still redact secrets          |
-| `/noleaks mode off`  | Disable all protection (dangerous)            |
+| `/leakguard`           | Show session statistics (blocked, redacted)   |
+| `/leakguard mode max`  | Block sensitive paths AND redact secrets      |
+| `/leakguard mode basic`| Allow reads but still redact secrets          |
+| `/leakguard mode off`  | Disable all protection (dangerous)            |
 
 ## Installation (local)
 

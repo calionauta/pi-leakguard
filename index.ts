@@ -19,13 +19,13 @@
  *   - Universal word scan: critical utilities as arguments (sudo chmod, dd, shred).
  *   - Write/edit payload scan: blocks writes containing secret-looking material.
  *   - grep/find/ls guard: blocks these tools over sensitive paths in max mode.
- *   - Persistence: mode survives sessions via ~/.pi/agent/noleaks.json.
+ *   - Persistence: mode survives sessions via ~/.pi/agent/leakguard.json.
  *
  * Usage:
- *   /noleaks              - Show session statistics
- *   /noleaks mode max     - Switch to MAX mode
- *   /noleaks mode basic   - Switch to BASIC mode
- *   /noleaks mode off     - Switch to OFF mode (DANGEROUS)
+ *   /leakguard              - Show session statistics
+ *   /leakguard mode max     - Switch to MAX mode
+ *   /leakguard mode basic   - Switch to BASIC mode
+ *   /leakguard mode off     - Switch to OFF mode (DANGEROUS)
  */
 
 import { homedir } from "node:os";
@@ -87,8 +87,8 @@ interface ToolCallResult {
 
 const EXTENSION_NAME = "leakguard";
 const DEFAULT_MODE: Mode = "max";
-const STATUS_KEY = "noleaks-mode";
-const CONFIG_PATH = join(homedir(), ".pi", "agent", "noleaks.json");
+const STATUS_KEY = "leakguard-mode";
+const CONFIG_PATH = join(homedir(), ".pi", "agent", "leakguard.json");
 
 // Shell commands that read files
 const FILE_READ_COMMANDS = new Set([
@@ -186,7 +186,7 @@ function saveConfig(mode: Mode): void {
 // Extension
 // ============================================================================
 
-export default function noleaksPersonal(pi: ExtensionAPI): void {
+export default function leakguardPersonal(pi: ExtensionAPI): void {
   const state: ExtensionState = {
     mode: loadConfig(),
     yolo: false,
@@ -301,7 +301,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
     const ok = await confirmBlock(
       ctx,
       "⚠️ Sensitive File Access",
-      `noleaks: attempt to read sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\nPattern: ${check.pattern!.name}\n\nAllow this read?`,
+      `leakguard: attempt to read sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\nPattern: ${check.pattern!.name}\n\nAllow this read?`,
       check.pattern!.category
     );
 
@@ -332,7 +332,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
     const ok = await confirmBlock(
       ctx,
       "⚠️ Sensitive File Write",
-      `noleaks: attempt to write to sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\n\nAllow this write?`,
+      `leakguard: attempt to write to sensitive file:\n\n  ${path}\n\nCategory: ${check.pattern!.category}\n\nAllow this write?`,
       check.pattern!.category
     );
 
@@ -367,7 +367,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
 
         const ok = await ctx.ui.confirm(
           "⚠️ Sensitive File Access via Shell",
-          `noleaks: blocked ${commandName} on sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`
+          `leakguard: blocked ${commandName} on sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`
         );
 
         if (!ok) {
@@ -392,7 +392,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         const ok = await confirmBlock(
           ctx,
           "⚠️ Sensitive File Write via Shell",
-          `noleaks: ${commandName} attempts to write to sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
+          `leakguard: ${commandName} attempts to write to sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
           check.pattern!.category
         );
         if (!ok) {
@@ -417,7 +417,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         const ok = await confirmBlock(
           ctx,
           "⚠️ Sensitive File Delete",
-          `noleaks: ${commandName} attempts to delete sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
+          `leakguard: ${commandName} attempts to delete sensitive file:\n\n  ${p}\n\nCategory: ${check.pattern!.category}\n\nAllow?`,
           check.pattern!.category
         );
         if (!ok) {
@@ -433,28 +433,28 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
     // Obfuscation (max only)
     const obfuscation = checkObfuscation(input.command);
     if (obfuscation && state.mode === "max") {
-      const ok = await confirmBlock(ctx, "⚠️ Obfuscated Command", `noleaks: ${obfuscation}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Obfuscation");
+      const ok = await confirmBlock(ctx, "⚠️ Obfuscated Command", `leakguard: ${obfuscation}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Obfuscation");
       if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${obfuscation}` };
     }
 
     // Egress DLP (2026): secret in network egress
     const egress = checkEgressSecrets(input.command);
     if (egress) {
-      const ok = await confirmBlock(ctx, "⚠️ Egress DLP", `noleaks: ${egress}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Egress DLP");
+      const ok = await confirmBlock(ctx, "⚠️ Egress DLP", `leakguard: ${egress}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Egress DLP");
       if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${egress}` };
     }
 
     // Env-dump / sensitive expansion / transform-smuggle / discovery-exfil
     const exfil = checkBashExfil(input.command);
     if (exfil && (state.mode === "max" || exfil.includes("secret") || exfil.includes("environment"))) {
-      const ok = await confirmBlock(ctx, "⚠️ Exfiltration Risk", `noleaks: ${exfil}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Exfiltration");
+      const ok = await confirmBlock(ctx, "⚠️ Exfiltration Risk", `leakguard: ${exfil}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Exfiltration");
       if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${exfil}` };
     }
 
     // Critical utilities / sensitive path references in args
     const words = checkBashWords(input.command, ctx.cwd, state.mode);
     if (words && state.mode === "max") {
-      const ok = await confirmBlock(ctx, "⚠️ Risky Command", `noleaks: ${words}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Command Scan");
+      const ok = await confirmBlock(ctx, "⚠️ Risky Command", `leakguard: ${words}\n\nCommand will be blocked unless you allow it.\n\nAllow?`, "Command Scan");
       if (!ok) return { block: true, reason: `Blocked by ${EXTENSION_NAME}: ${words}` };
     }
 
@@ -490,7 +490,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
       state.stats.redactedSecrets += totalRedacted;
       return {
         content: newContent,
-        details: { ...(event.details as Record<string, unknown> | undefined ?? {}), noleaksRedacted: totalRedacted },
+        details: { ...(event.details as Record<string, unknown> | undefined ?? {}), leakguardRedacted: totalRedacted },
       };
     }
 
@@ -547,7 +547,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         const ok = await confirmBlock(
           ctx,
           "⚠️ Secret in Write Payload",
-          "noleaks: write/edit payload contains secret-looking material.\n\nAllow this write?",
+          "leakguard: write/edit payload contains secret-looking material.\n\nAllow this write?",
           "Secret Payload"
         );
         if (!ok) {
@@ -562,7 +562,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         const ok = await confirmBlock(
           ctx,
           "⚠️ Tainted Egress",
-          "noleaks: write references content previously read from a sensitive path.\n\nAllow this write?",
+          "leakguard: write references content previously read from a sensitive path.\n\nAllow this write?",
           "Taint Egress"
         );
         if (!ok) {
@@ -584,7 +584,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
           const ok = await confirmBlock(
             ctx,
             "⚠️ Sensitive Path Scan",
-            `noleaks: ${e.toolName} over sensitive path '${pathArg}' (${check.pattern!.category}).\n\nAllow?`,
+            `leakguard: ${e.toolName} over sensitive path '${pathArg}' (${check.pattern!.category}).\n\nAllow?`,
             check.pattern!.category
           );
           if (!ok) {
@@ -599,7 +599,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         const ok = await confirmBlock(
           ctx,
           "⚠️ Secret in Query",
-          `noleaks: ${e.toolName} payload references secret-looking material.\n\nAllow?`,
+          `leakguard: ${e.toolName} payload references secret-looking material.\n\nAllow?`,
           "Secret Payload"
         );
         if (!ok) {
@@ -626,13 +626,13 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
         if (inj.high.length > 0) {
           notify(
             ctx,
-            `🚨 noleaks: potential prompt-injection in ${e.toolName} output [${inj.high.join(", ")}]. Review before trusting.`,
+            `🚨 leakguard: potential prompt-injection in ${e.toolName} output [${inj.high.join(", ")}]. Review before trusting.`,
             "warning"
           );
         } else if (inj.low.length > 0 && !state.yolo) {
           notify(
             ctx,
-            `⚠️ noleaks: suspicious phrasing in ${e.toolName} output [${inj.low.join(", ")}]. Possible injection.`,
+            `⚠️ leakguard: suspicious phrasing in ${e.toolName} output [${inj.low.join(", ")}]. Possible injection.`,
             "info"
           );
         }
@@ -640,8 +640,8 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
     }
 
     const result = redactToolResult(e);
-    if (result && state.mode === "max" && ((result.details?.noleaksRedacted as number) ?? 0) > 0) {
-      notify(ctx, `🛡️ noleaks: redacted ${(result.details?.noleaksRedacted as number) ?? 0} secret(s) from ${e.toolName} output`, "info");
+    if (result && state.mode === "max" && ((result.details?.leakguardRedacted as number) ?? 0) > 0) {
+      notify(ctx, `🛡️ leakguard: redacted ${(result.details?.leakguardRedacted as number) ?? 0} secret(s) from ${e.toolName} output`, "info");
     }
     return result as { content?: typeof e.content; details?: unknown } | undefined;
   });
@@ -650,7 +650,7 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
   // Commands
   // ──────────────────────────────────────────────────────────────────────────
 
-  pi.registerCommand("noleaks", {
+  pi.registerCommand("leakguard", {
     description: `Manage ${EXTENSION_NAME} protection (current mode: ${state.mode})`,
     handler: async (args, ctx) => {
       const trimmed = args.trim();
@@ -691,11 +691,11 @@ export default function noleaksPersonal(pi: ExtensionAPI): void {
       notify(
         ctx,
         `${EXTENSION_NAME} commands:\n` +
-        `  /noleaks              - Show session statistics\n` +
-        `  /noleaks mode max     - Block sensitive paths AND redact secrets\n` +
-        `  /noleaks mode basic   - Allow reads, still redact secrets\n` +
-        `  /noleaks mode off     - Disable all protection\n` +
-        `  /noleaks yolo         - Skip confirm prompts this session (redaction stays on)`,
+        `  /leakguard              - Show session statistics\n` +
+        `  /leakguard mode max     - Block sensitive paths AND redact secrets\n` +
+        `  /leakguard mode basic   - Allow reads, still redact secrets\n` +
+        `  /leakguard mode off     - Disable all protection\n` +
+        `  /leakguard yolo         - Skip confirm prompts this session (redaction stays on)`,
         "info"
       );
     },
