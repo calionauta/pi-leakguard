@@ -393,50 +393,6 @@ export function checkEgressSecrets(command: string): string | undefined {
 }
 
 // ============================================================================
-// Prompt-injection detection (2026 OWASP #1 / FIDES pattern)
-// ============================================================================
-
-// Patterns indicating an indirect prompt-injection attempt embedded in data
-// the agent is about to ingest (tool results, read files, web content).
-//
-// Two tiers:
-//  - HIGH confidence (always alert/block): channel-spoofing and explicit
-//    exfil/override directives. These rarely appear in legitimate dev text.
-//  - LOW confidence (warn only): generic "ignore/do-not-tell/you-are-now"
-//    phrasing, which produces false positives in normal prose.
-export interface InjectionPattern {
-  name: string;
-  pattern: RegExp;
-  confidence: "high" | "low";
-}
-
-export const INJECTION_PATTERNS: InjectionPattern[] = [
-  { name: "system-override", pattern: /\[\s*(?:system|assistant|model|ai)\s*(?:override|prompt|instruction|message|command)\s*\]/i, confidence: "high" },
-  { name: "tool-result-spoof", pattern: /(?:tool\s*_?result|assistant\s*_?message|function\s*_?result)\s*[:=]/i, confidence: "high" },
-  { name: "exfil-instruction", pattern: /(?:send|post|upload|exfiltrate|forward|transmit)\s+(?:the|all|any)?\s*(?:secret|token|key|password|credential|env|environment|\.env)/i, confidence: "high" },
-  { name: "developer-mode", pattern: /(?:enter|enable|activate)\s+(?:developer|debug|admin|maintenance|god)\s*mode/i, confidence: "high" },
-  // LOW confidence — common in legitimate prose, warn-only
-  { name: "ignore-instructions", pattern: /ignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above)\s+(?:instructions|prompt|system\s*message|context)/i, confidence: "low" },
-  { name: "disregard-instructions", pattern: /disregard\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above)\s+(?:instructions|prompt|system\s*message|context)/i, confidence: "low" },
-  { name: "do-not-tell", pattern: /(?:do\s+not|don'?t|never)\s+(?:tell|mention|reveal|show|inform|alert|warn|disclose)\b/i, confidence: "low" },
-  { name: "you-are-now", pattern: /you\s+are\s+now\b/i, confidence: "low" },
-];
-
-/**
- * Detect prompt-injection attempts in arbitrary text (tool results, file reads).
- * Returns matched patterns split by confidence. High-confidence matches are
- * almost always injection; low-confidence are warn-only to avoid false positives.
- */
-export function detectInjection(text: string): { high: string[]; low: string[] } {
-  const high: string[] = [];
-  const low: string[] = [];
-  for (const { name, pattern, confidence } of INJECTION_PATTERNS) {
-    if (pattern.test(text)) (confidence === "high" ? high : low).push(name);
-  }
-  return { high, low };
-}
-
-// ============================================================================
 // Taint tracking (2026 information-flow control)
 // ============================================================================
 

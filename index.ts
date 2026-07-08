@@ -48,7 +48,6 @@ import {
   checkEgressSecrets,
   checkObfuscation,
   checkPathSensitivity,
-  detectInjection,
   hasSecretMaterial,
   isTaintedEgress,
   redactSecretsInText,
@@ -615,35 +614,11 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    const e = event as ToolResultEvent;
-
-    // Injection detection (2026): scan tool results for embedded injection attempts
-    if (state.mode !== "off" && e.content && Array.isArray(e.content)) {
-      for (const block of e.content) {
-        if (block.type !== "text") continue;
-        const textBlock = block as { type: "text"; text: string };
-        const inj = detectInjection(textBlock.text);
-        if (inj.high.length > 0) {
-          notify(
-            ctx,
-            `🚨 leakguard: potential prompt-injection in ${e.toolName} output [${inj.high.join(", ")}]. Review before trusting.`,
-            "warning"
-          );
-        } else if (inj.low.length > 0 && !state.yolo) {
-          notify(
-            ctx,
-            `⚠️ leakguard: suspicious phrasing in ${e.toolName} output [${inj.low.join(", ")}]. Possible injection.`,
-            "info"
-          );
-        }
-      }
-    }
-
-    const result = redactToolResult(e);
+    const result = redactToolResult(event as ToolResultEvent);
     if (result && state.mode === "max" && ((result.details?.leakguardRedacted as number) ?? 0) > 0) {
-      notify(ctx, `🛡️ leakguard: redacted ${(result.details?.leakguardRedacted as number) ?? 0} secret(s) from ${e.toolName} output`, "info");
+      notify(ctx, `🛡️ leakguard: redacted ${(result.details?.leakguardRedacted as number) ?? 0} secret(s) from ${event.toolName} output`, "info");
     }
-    return result as { content?: typeof e.content; details?: unknown } | undefined;
+    return result as { content?: typeof event.content; details?: unknown } | undefined;
   });
 
   // ──────────────────────────────────────────────────────────────────────────
