@@ -1,5 +1,5 @@
 /**
- * noleaks-personal - Personal noleaks extension for pi.dev
+ * leakguard - Leak guard extension for pi.dev
  *
  * Inspired by [@raquezha/noleaks](https://pi.dev/packages/@raquezha/noleaks).
  *
@@ -85,7 +85,7 @@ interface ToolCallResult {
 // Constants
 // ============================================================================
 
-const EXTENSION_NAME = "noleaks-personal";
+const EXTENSION_NAME = "leakguard";
 const DEFAULT_MODE: Mode = "max";
 const STATUS_KEY = "noleaks-mode";
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "noleaks.json");

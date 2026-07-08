@@ -1,7 +1,7 @@
 {
-  "name": "pi-noleaks-personal",
-  "version": "1.0.0",
-  "description": "Personal noleaks extension for pi.dev - blocks LLM access to sensitive paths and redacts secrets from tool output. Inspired by @raquezha/noleaks.",
+  "name": "pi-leakguard",
+  "version": "1.1.0",
+  "description": "Leak guard for pi.dev - blocks LLM access to sensitive paths, egress DLP, prompt-injection detection, taint tracking, and secret redaction. Inspired by @raquezha/noleaks.",
   "main": "index.ts",
   "type": "module",
   "scripts": {
@@ -22,7 +22,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/calionauta/pi-noleaks-personal"
+    "url": "https://github.com/calionauta/pi-leakguard"
   },
   "pi": {
     "extensions": ["./index.ts"]

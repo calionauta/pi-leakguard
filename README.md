@@ -1,4 +1,4 @@
-# pi-noleaks-personal
+# pi-leakguard
 
 Personal **noleaks** extension for [pi.dev](https://pi.dev) — a defense-in-depth
 "seatbelt" that blocks the LLM from reading/writing/exfiltrating credentials and
@@ -16,7 +16,7 @@ redacts secrets from tool output before the model ever sees them.
 > removed from GitHub/npm. This project is an independent continuation that
 > preserves and extends its ideas. The MIT license and attribution are retained.
 
-> **Security model:** `noleaks-personal` is a powerful defense-in-depth
+> **Security model:** `leakguard` is a powerful defense-in-depth
 > "seatbelt", **not** an airtight sandbox. It prevents accidental leaks and stops
 > common AI exfiltration techniques. For untrusted code or unattended automation,
 > always use a real sandbox (Docker, Micro-VM).
@@ -77,18 +77,18 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 
 ## Installation (local)
 
-Already installed at `~/.pi/agent/extensions/noleaks-personal/`. Auto-loaded by pi.
+Already installed at `~/.pi/agent/extensions/leakguard/`. Auto-loaded by pi.
 
 ## Installation (from GitHub)
 
 ```bash
-pi install git:github.com/calionauta/pi-noleaks-personal
+pi install git:github.com/calionauta/pi-leakguard
 ```
 
 Or pin a version:
 
 ```bash
-pi install git:github.com/calionauta/pi-noleaks-personal@v1.0.0
+pi install git:github.com/calionauta/pi-leakguard@v1.0.0
 ```
 
 ## Development
