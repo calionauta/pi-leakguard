@@ -27,9 +27,11 @@
   "pi": {
     "extensions": ["./index.ts"]
   },
-  "dependencies": {},
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
+  },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
   },
