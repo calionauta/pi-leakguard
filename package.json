@@ -1,0 +1,39 @@
+{
+  "name": "pi-noleaks-personal",
+  "version": "1.0.0",
+  "description": "Personal noleaks extension for pi.dev - blocks LLM access to sensitive paths and redacts secrets from tool output. Inspired by @raquezha/noleaks.",
+  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test security.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "security",
+    "secrets",
+    "noleaks",
+    "dlp",
+    "credentials"
+  ],
+  "author": "calionauta",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/calionauta/pi-noleaks-personal"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
