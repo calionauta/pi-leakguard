@@ -232,7 +232,8 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
 
   const updateStatus = (ctx: ExtensionContext): void => {
     if (!ctx.hasUI) return;
-    ctx.ui.setStatus(STATUS_KEY, `${getModeIcon(state.mode)} ${getModeLabel(state.mode)}`);
+    const yoloTag = state.yolo ? " 🔥" : "";
+    ctx.ui.setStatus(STATUS_KEY, `${getModeIcon(state.mode)} ${getModeLabel(state.mode)}${yoloTag}`);
   };
 
   const notify = (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "info"): void => {
@@ -707,11 +708,13 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     // YOLO: skip confirm prompts for this session (redaction still applies)
     if (trimmed === "yolo" || trimmed === "yolo on") {
       state.yolo = true;
+      updateStatus(ctx);
       notify(ctx, `🔥 ${EXTENSION_NAME}: YOLO mode ON - blocks will ask, but you can allow per-session. Redaction still active.`, "warning");
       return;
     }
     if (trimmed === "yolo off") {
       state.yolo = false;
+      updateStatus(ctx);
       notify(ctx, `🔒 ${EXTENSION_NAME}: YOLO mode OFF - confirm prompts restored.`, "info");
       return;
     }

@@ -160,7 +160,8 @@ npm run typecheck # tsc --noEmit
 - 🔒 `max` (default) - full protection
 - 🟡 `basic` - redact only
 - 🔓 `off` - no protection
+- 🔥 appended when `/leakguard yolo` is on (confirm prompts skipped; redaction stays on)
 
 ## License
 
-MIT — same as the inspiring [`@raquezha/noleaks`](https://pi.dev/packages/@raquezha/noleaks).
+MIT.
