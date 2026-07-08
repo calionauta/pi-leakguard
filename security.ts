@@ -241,6 +241,21 @@ export interface SecretPattern {
   severity: "low" | "medium" | "high" | "critical";
 }
 
+export interface TrustedPattern {
+  raw: string;
+  test: (s: string) => boolean;
+}
+
+export function parseTrustedPattern(raw: string): TrustedPattern {
+  if (raw.startsWith("/") && raw.endsWith("/") && raw.length > 2) {
+    const source = raw.slice(1, -1);
+    const regex = new RegExp(source, "i");
+    return { raw, test: (s: string) => regex.test(s) };
+  }
+  const lower = raw.toLowerCase();
+  return { raw, test: (s: string) => s.toLowerCase().includes(lower) };
+}
+
 export const REDACTION_PLACEHOLDER = "[LEAKGUARD_REDACTED]";
 
 export const SECRET_PATTERNS: SecretPattern[] = [
@@ -297,11 +312,21 @@ export interface RedactStats {
   redactedByPattern: Record<string, number>;
 }
 
+export interface RedactOptions {
+  trustedTest?: (text: string) => boolean;
+}
+
 export function redactSecretsInText(
   text: string,
   stats: RedactStats,
-  patterns: SecretPattern[] = SECRET_PATTERNS
+  patterns: SecretPattern[] = SECRET_PATTERNS,
+  options?: RedactOptions
 ): { text: string; count: number } {
+  // Skip redaction entirely if text matches a trusted pattern
+  if (options?.trustedTest && options.trustedTest(text)) {
+    return { text, count: 0 };
+  }
+
   let result = text;
   let totalCount = 0;
 
@@ -317,15 +342,16 @@ export function redactSecretsInText(
     stats.redactedByPattern[pattern.name] = (stats.redactedByPattern[pattern.name] ?? 0) + matchCount;
 
     const captureCount = countCaptureGroups(pattern.pattern.source);
+    const placeholder = `${REDACTION_PLACEHOLDER} — ${pattern.name}`;
 
     pattern.pattern.lastIndex = 0;
     result = result.replace(pattern.pattern, (match: string, ...args: unknown[]) => {
       const captureGroups = args.slice(0, captureCount);
       const firstGroup = captureGroups.find((g): g is string => typeof g === "string" && g.length > 0);
       if (firstGroup) {
-        return match.replace(firstGroup, REDACTION_PLACEHOLDER);
+        return match.replace(firstGroup, placeholder);
       }
-      return REDACTION_PLACEHOLDER;
+      return placeholder;
     });
   }
 

@@ -2,6 +2,22 @@
 
 All notable changes to `pi-leakguard` are documented here.
 
+## [1.2.0] - 2026-07-08
+
+### Added
+- `/leakguard trust <pattern>` — session-level allow-list for redaction bypass.
+  Literal string or `/regex/` syntax. Human-only via pi command.
+- `trust list`, `trust clear`, `trust remove <n>` sub-commands.
+- Informative placeholder: `[LEAKGUARD_REDACTED — JWT Token]` shows the pattern
+  name that matched, giving the LLM context to ask for the right trust pattern.
+
+### Security
+- LLM never self-bypasses. Trust is human-only, same model as `allow-once`/`yolo`/`mode`.
+
+### Tests
+- 8 new tests: parseTrustedPattern (literal, regex, case-insensitive), trustedTest
+  skip/isolation, informative placeholder (AWS key, JWT Token, safe text).
+
 ## [1.0.0] - 2026-07-02
 
 ### Added

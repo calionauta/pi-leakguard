@@ -19,6 +19,7 @@ import {
   formatAuditEntry,
   hasSecretMaterial,
   isTaintedEgress,
+  parseTrustedPattern,
   redactSecretsInText,
   resolvePath,
   scanForSecrets,
@@ -202,7 +203,7 @@ function redact(text: string): { text: string; count: number } {
 test("redactSecretsInText redacts AWS key", () => {
   const { text } = redact("key=AKIAIOSFODNN7EXAMPLE rest");
   assert.ok(!text.includes("AKIAIOSFODNN7EXAMPLE"));
-  assert.match(text, /\[LEAKGUARD_REDACTED\]/);
+  assert.match(text, /\[LEAKGUARD_REDACTED/);
 });
 
 test("redactSecretsInText redacts OpenAI key", () => {
@@ -376,4 +377,75 @@ test("formatAuditEntry produces valid JSONL line", () => {
   assert.equal(parsed.event, "block");
   assert.equal(parsed.tool, "bash");
   assert.ok(line.endsWith("\n"));
+});
+
+// ============================================================================
+// Trust (new feature)
+// ============================================================================
+
+function redactOpts(text: string, opts?: { trustedTest?: (text: string) => boolean }): { text: string; count: number } {
+  const stats: RedactStats = { redactedByPattern: {} };
+  return redactSecretsInText(text, stats, undefined, opts);
+}
+
+test("parseTrustedPattern creates literal matcher", () => {
+  const p = parseTrustedPattern("pbinstall");
+  assert.ok(p.test("http://example.com/_/#/pbinstall/eyJ"));
+  assert.ok(!p.test("just normal text"));
+});
+
+test("parseTrustedPattern creates regex matcher", () => {
+  const p = parseTrustedPattern("/install.*token/");
+  assert.ok(p.test("install-url-token-123"));
+  assert.ok(!p.test("just normal text"));
+});
+
+test("parseTrustedPattern literal is case-insensitive", () => {
+  const p = parseTrustedPattern("PBInstall");
+  assert.ok(p.test("pbinstall"));
+  assert.ok(p.test("PBINSTALL"));
+});
+
+test("trustedTest skips redaction entirely", () => {
+  const trustedTest = (s: string) => s.includes("pbinstall");
+  const { text, count } = redactOpts(
+    "url: http://example.com/_/#/pbinstall/eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3ODM1NDM3ODl9.sig",
+    { trustedTest }
+  );
+  assert.equal(count, 0, "should not redact trusted text");
+  assert.ok(text.includes("eyJhbGci"), "JWT should remain intact");
+});
+
+test("trustedTest does not affect non-trusted text", () => {
+  const trustedTest = (s: string) => s.includes("pbinstall");
+  const { text, count } = redactOpts(
+    "API key: sk-proj-abcdefghijklmnopqrstuvwxyz",
+    { trustedTest }
+  );
+  assert.equal(count, 1);
+  assert.ok(!text.includes("sk-proj-"));
+});
+
+// ============================================================================
+// Informative placeholder (default behavior)
+// ============================================================================
+
+test("placeholder includes pattern name", () => {
+  const { text } = redactOpts("key=AKIAIOSFODNN7EXAMPLE rest");
+  assert.ok(text.includes("AWS Access Key ID"), "placeholder should include pattern name");
+  assert.ok(!text.includes("AKIAIOSFODNN7"), "secret should still be removed");
+});
+
+test("placeholder shows JWT Token pattern name", () => {
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3ODM1NDM3ODl9.S5PGQLyZfPq2kWc3nZQa4saFeII2kObDg1Gq64uiKJQ";
+  const { text } = redactOpts(`token=${jwt} rest`);
+  assert.ok(text.includes("JWT Token"), "placeholder should say JWT Token");
+  assert.ok(!text.includes("eyJhbGci"), "JWT should still be removed");
+});
+
+test("placeholder without secrets shows no placeholder", () => {
+  const input = "just a normal log line";
+  const { text, count } = redactOpts(input);
+  assert.equal(text, input);
+  assert.equal(count, 0);
 });

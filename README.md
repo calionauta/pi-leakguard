@@ -88,6 +88,12 @@ Think of leakguard as shrinking the blast radius, not as a detector.
   (`.env`, `~/.ssh/`, `~/.aws/`, `/etc/shadow`, Keychains, etc.)
 - **Secret redaction**: leakguard scrubs API keys, tokens, passwords, private-key blocks,
   DB URLs, and secret assignments from `tool_result` content.
+- **Informative placeholder**: redacted values show the pattern name that matched:
+  `[LEAKGUARD_REDACTED — JWT Token]`. Helps the LLM understand what was redacted
+  and ask for the right trust pattern.
+- **Session trust**: mark a pattern as trusted for the current session. Leakguard
+  skips redaction for output containing that pattern. LLM cannot self-bypass — only
+  the human can run `/leakguard trust <pattern>`.
 - **Symlink guard**: leakguard resolves paths to their *real* on-disk location before
   checking, so symlink bypasses are caught.
 - **Obfuscation detection**: leakguard rejects NFKC normalization variance and hidden/control
@@ -131,14 +137,18 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 
 ## Commands
 
-| Command              | Description                                   |
-| -------------------- | --------------------------------------------- |
-| `/leakguard`           | Show session statistics (blocked, redacted)   |
-| `/leakguard mode max`  | Block sensitive paths AND redact secrets      |
-| `/leakguard mode basic`| Allow reads but still redact secrets          |
-| `/leakguard mode off`  | Disable all protection (dangerous)            |
-| `/leakguard yolo`      | Skip confirm prompts this session — session-only, resets on next session (redaction stays on) |
-| `/leakguard allow-once`| Allow one redacted value through without changing mode — single use, human-only via confirm |
+| Command                     | Description                                              |
+| --------------------------- | -------------------------------------------------------- |
+| `/leakguard`                | Show session statistics (blocked, redacted)              |
+| `/leakguard mode max`       | Block sensitive paths AND redact secrets                 |
+| `/leakguard mode basic`     | Allow reads but still redact secrets                     |
+| `/leakguard mode off`       | Disable all protection (dangerous)                       |
+| `/leakguard yolo`           | Skip confirm prompts this session — session-only, resets on next session (redaction stays on) |
+| `/leakguard allow-once`     | Allow one redacted value through without changing mode — single use, human-only via confirm |
+| `/leakguard trust <pattern>`| Trust a pattern (literal or `/regex/`) for this session — skips redaction. Human-only. |
+| `/leakguard trust list`     | List active trusted patterns                             |
+| `/leakguard trust clear`    | Clear all trusted patterns                               |
+| `/leakguard trust remove n` | Remove a trusted pattern by index                        |
 
 ## Installation (local)
 

@@ -56,6 +56,7 @@ import {
   detectGitPublish,
   hasSecretMaterial,
   isTaintedEgress,
+  parseTrustedPattern,
   redactSecretsInText,
   resolvePath,
   scanForSecrets,
@@ -63,6 +64,7 @@ import {
   type AuditEntry,
   type LeakguardConfig,
   type RedactStats,
+  type TrustedPattern,
 } from "./security.js";
 
 // ============================================================================
@@ -82,6 +84,7 @@ interface ExtensionState {
   mode: Mode;
   yolo: boolean;
   allowOnce: boolean;
+  trustedPatterns: TrustedPattern[];
   taintedPaths: Set<string>;
   config: ReturnType<typeof buildConfig>;
   cwdFallback: string;
@@ -216,6 +219,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     mode: loaded.mode,
     yolo: false,
     allowOnce: false,
+    trustedPatterns: [],
     taintedPaths: new Set<string>(),
     config: buildConfig(loaded.raw),
     cwdFallback: process.cwd(),
@@ -553,13 +557,20 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       };
     }
 
+    // Build trustedTest from active trusted patterns
+    const trustedTest = state.trustedPatterns.length > 0
+      ? (text: string) => state.trustedPatterns.some((p) => p.test(text))
+      : undefined;
+
     let totalRedacted = 0;
     let contentChanged = false;
     const newContent = event.content.map((block) => {
       if (block.type !== "text") return block;
       const textBlock = block as { type: "text"; text: string };
 
-      const result = redactSecretsInText(textBlock.text, state.stats, state.config.secretPatterns);
+      const result = redactSecretsInText(textBlock.text, state.stats, state.config.secretPatterns, {
+        trustedTest,
+      });
       if (result.count > 0) {
         totalRedacted += result.count;
         contentChanged = true;
@@ -571,7 +582,8 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     if (contentChanged) {
       state.stats.redactedSecrets += totalRedacted;
       audit({ ts: new Date().toISOString(), event: "redact", tool: event.toolName, count: totalRedacted });
-      const note = `\n[leakguard: ${totalRedacted} secret(s) redacted - security, not an error.\nIf you need this value, ask the human to run: /leakguard allow-once]\n`;
+
+      const note = `\n[leakguard: ${totalRedacted} secret(s) redacted - security, not an error.\nIf you need this value, ask the human to run: /leakguard allow-once or /leakguard trust <pattern>]\n`;
       if (newContent.length > 0 && newContent[0]?.type === "text") {
         newContent[0] = { ...newContent[0] as { type: "text"; text: string }, text: note + (newContent[0] as { type: "text"; text: string }).text };
       }
@@ -605,7 +617,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async () => {
-    // Cleanup if needed
+    // Cleanup handled by session lifecycle
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -695,7 +707,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
 
   pi.on("tool_result", async (event, ctx) => {
     const result = redactToolResult(event as ToolResultEvent);
-    if (result && state.mode === "max" && ((result.details?.leakguardRedacted as number) ?? 0) > 0) {
+    if (result && state.mode !== "off" && ((result.details?.leakguardRedacted as number) ?? 0) > 0) {
       notify(ctx, `🛡️ leakguard: redacted ${(result.details?.leakguardRedacted as number) ?? 0} secret(s) from ${event.toolName} output`, "info");
     }
     return result as { content?: typeof event.content; details?: unknown } | undefined;
@@ -744,6 +756,46 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       return;
     }
 
+    // trust: manage session-level trusted patterns (sub-commands before generic add)
+    if (trimmed === "trust list") {
+      if (state.trustedPatterns.length === 0) {
+        notify(ctx, `📋 ${EXTENSION_NAME}: no trusted patterns active.`, "info");
+        return;
+      }
+      const lines = state.trustedPatterns.map((p, i) => `  ${i + 1}. ${p.raw}`);
+      notify(ctx, `📋 ${EXTENSION_NAME} trusted patterns:\n${lines.join("\n")}`, "info");
+      return;
+    }
+    if (trimmed === "trust clear") {
+      const count = state.trustedPatterns.length;
+      state.trustedPatterns = [];
+      updateStatus(ctx);
+      notify(ctx, `🗑️ ${EXTENSION_NAME}: cleared ${count} trusted pattern(s).`, "info");
+      return;
+    }
+    const trustRemoveMatch = trimmed.match(/^trust\s+remove\s+(\d+)$/);
+    if (trustRemoveMatch) {
+      const idx = parseInt(trustRemoveMatch[1]!, 10) - 1;
+      if (idx >= 0 && idx < state.trustedPatterns.length) {
+        const removed = state.trustedPatterns.splice(idx, 1)[0]!;
+        updateStatus(ctx);
+        notify(ctx, `🗑️ ${EXTENSION_NAME}: removed trusted pattern "${removed.raw}".`, "info");
+      } else {
+        notify(ctx, `❌ ${EXTENSION_NAME}: invalid index. Use "trust list" to see indexes.`, "warning");
+      }
+      return;
+    }
+    const trustMatch = trimmed.match(/^trust\s+(.+)$/);
+    if (trustMatch) {
+      const raw = trustMatch[1]!.trim();
+      const tp = parseTrustedPattern(raw);
+      state.trustedPatterns.push(tp);
+      updateStatus(ctx);
+      audit({ ts: new Date().toISOString(), event: "allow", tool: "trust", reason: `trust pattern: ${raw}` });
+      notify(ctx, `✅ ${EXTENSION_NAME}: trusting pattern "${raw}" for this session.`, "info");
+      return;
+    }
+
     // allow-once: skip redaction for the next tool_result (single use).
     // Only the human can grant this via confirm — the LLM cannot execute
     // pi commands. Flag resets after one tool_result regardless.
@@ -772,12 +824,13 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     notify(
       ctx,
       `${EXTENSION_NAME} commands:\n` +
-      `  /leakguard              - Show session statistics\n` +
-      `  /leakguard mode max     - Block sensitive paths AND redact secrets\n` +
-      `  /leakguard mode basic   - Allow reads, still redact secrets\n` +
-      `  /leakguard mode off     - Disable all protection\n` +
-      `  /leakguard yolo         - Skip confirm prompts (session-only, resets on next session; redaction stays on)\n` +
-      `  /leakguard allow-once   - Skip redaction for one value (single use, resets after)`,
+      `  /leakguard                    - Show session statistics\n` +
+      `  /leakguard mode max|basic|off - Change protection mode\n` +
+      `  /leakguard yolo               - Skip confirm prompts (session-only; redaction stays on)\n` +
+      `  /leakguard allow-once         - Skip redaction for one value (single use, resets after)\n` +
+      `  /leakguard trust <pattern>    - Trust a pattern (literal or /regex/) for this session\n` +
+      `  /leakguard trust list|clear   - List or clear trusted patterns\n` +
+      `  /leakguard trust remove <n>   - Remove a trusted pattern by index`,
       "info"
     );
   };
