@@ -81,6 +81,7 @@ interface SessionStats extends RedactStats {
 interface ExtensionState {
   mode: Mode;
   yolo: boolean;
+  allowOnce: boolean;
   taintedPaths: Set<string>;
   config: ReturnType<typeof buildConfig>;
   cwdFallback: string;
@@ -214,6 +215,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
   const state: ExtensionState = {
     mode: loaded.mode,
     yolo: false,
+    allowOnce: false,
     taintedPaths: new Set<string>(),
     config: buildConfig(loaded.raw),
     cwdFallback: process.cwd(),
@@ -233,7 +235,8 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
   const updateStatus = (ctx: ExtensionContext): void => {
     if (!ctx.hasUI) return;
     const yoloTag = state.yolo ? " 🔥" : "";
-    ctx.ui.setStatus(STATUS_KEY, `${getModeIcon(state.mode)} ${getModeLabel(state.mode)}${yoloTag}`);
+    const allowOnceTag = state.allowOnce ? " ⚡" : "";
+    ctx.ui.setStatus(STATUS_KEY, `${getModeIcon(state.mode)} ${getModeLabel(state.mode)}${yoloTag}${allowOnceTag}`);
   };
 
   const notify = (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "info"): void => {
@@ -539,6 +542,17 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     if (state.mode === "off") return undefined;
     if (!event.content || !Array.isArray(event.content)) return undefined;
 
+    // allow-once: skip redaction for exactly one tool_result, then reset
+    if (state.allowOnce) {
+      state.allowOnce = false;
+      updateStatus(event as unknown as ExtensionContext);
+      audit({ ts: new Date().toISOString(), event: "allow", tool: event.toolName, reason: "allow-once" });
+      return {
+        content: event.content,
+        details: { ...(event.details as Record<string, unknown> | undefined ?? {}), leakguardAllowedOnce: true },
+      };
+    }
+
     let totalRedacted = 0;
     let contentChanged = false;
     const newContent = event.content.map((block) => {
@@ -557,7 +571,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     if (contentChanged) {
       state.stats.redactedSecrets += totalRedacted;
       audit({ ts: new Date().toISOString(), event: "redact", tool: event.toolName, count: totalRedacted });
-      const note = `\n[leakguard: ${totalRedacted} secret(s) redacted - security, not an error]\n`;
+      const note = `\n[leakguard: ${totalRedacted} secret(s) redacted - security, not an error.\nIf you need this value, ask the human to run: /leakguard allow-once]\n`;
       if (newContent.length > 0 && newContent[0]?.type === "text") {
         newContent[0] = { ...newContent[0] as { type: "text"; text: string }, text: note + (newContent[0] as { type: "text"; text: string }).text };
       }
@@ -730,6 +744,30 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       return;
     }
 
+    // allow-once: skip redaction for the next tool_result (single use).
+    // Only the human can grant this via confirm — the LLM cannot execute
+    // pi commands. Flag resets after one tool_result regardless.
+    if (trimmed === "allow-once") {
+      if (state.allowOnce) {
+        notify(ctx, `⚡ ${EXTENSION_NAME}: allow-once already active — next redacted output will pass through.`, "info");
+        return;
+      }
+      const ok = await ctx.ui.confirm(
+        "⚡ Allow One Redacted Value?",
+        `${EXTENSION_NAME}: allow-once lets the next single redacted value pass through without redaction.\n\n` +
+        "After that one pass, redaction resumes automatically — the mode stays unchanged.\n\n" +
+        "Allow one value to bypass redaction?"
+      );
+      if (!ok) {
+        notify(ctx, `🔒 ${EXTENSION_NAME}: allow-once cancelled.`, "info");
+        return;
+      }
+      state.allowOnce = true;
+      updateStatus(ctx);
+      notify(ctx, `⚡ ${EXTENSION_NAME}: allow-once active — next redacted output will pass through.`, "warning");
+      return;
+    }
+
     // Help
     notify(
       ctx,
@@ -738,7 +776,8 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       `  /leakguard mode max     - Block sensitive paths AND redact secrets\n` +
       `  /leakguard mode basic   - Allow reads, still redact secrets\n` +
       `  /leakguard mode off     - Disable all protection\n` +
-      `  /leakguard yolo         - Skip confirm prompts (session-only, resets on next session; redaction stays on)`,
+      `  /leakguard yolo         - Skip confirm prompts (session-only, resets on next session; redaction stays on)\n` +
+      `  /leakguard allow-once   - Skip redaction for one value (single use, resets after)`,
       "info"
     );
   };
