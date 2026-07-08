@@ -4,13 +4,17 @@ Personal **noleaks** extension for [pi.dev](https://pi.dev) — a defense-in-dep
 "seatbelt" that blocks the LLM from reading/writing/exfiltrating credentials and
 redacts secrets from tool output before the model ever sees them.
 
-> **Inspired by [`@raquezha/noleaks`](https://pi.dev/packages/@raquezha/noleaks)**
-> (MIT, by raquezha). This personal fork keeps the original's security layers
-> and adds a richer redaction set, interactive read confirmation, detailed
-> session stats, and mode persistence. Credit for the core bash-security logic
-> (symlink guard, obfuscation detection, env-dump/sensitive-expansion blocks,
-> transform-smuggle, discovery/exfil combine, universal word scan, write-payload
-> scan, grep/find/ls guards, and `noleaks.json` persistence) goes to that project.
+> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha). This personal fork
+> keeps the original's security layers and adds a richer redaction set, interactive
+> confirmation on every block, detailed session stats, and mode persistence.
+> Credit for the core bash-security logic (symlink guard, obfuscation detection,
+> env-dump/sensitive-expansion blocks, transform-smuggle, discovery/exfil combine,
+> universal word scan, write-payload scan, grep/find/ls guards, and `noleaks.json`
+> persistence) goes to that project.
+>
+> **Note:** the original `@raquezha/noleaks` repository appears to have been
+> removed from GitHub/npm. This project is an independent continuation that
+> preserves and extends its ideas. The MIT license and attribution are retained.
 
 > **Security model:** `noleaks-personal` is a powerful defense-in-depth
 > "seatbelt", **not** an airtight sandbox. It prevents accidental leaks and stops
