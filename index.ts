@@ -557,6 +557,10 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     if (contentChanged) {
       state.stats.redactedSecrets += totalRedacted;
       audit({ ts: new Date().toISOString(), event: "redact", tool: event.toolName, count: totalRedacted });
+      const note = `\n[leakguard: ${totalRedacted} secret(s) redacted - security, not an error]\n`;
+      if (newContent.length > 0 && newContent[0]?.type === "text") {
+        newContent[0] = { ...newContent[0] as { type: "text"; text: string }, text: note + (newContent[0] as { type: "text"; text: string }).text };
+      }
       return {
         content: newContent,
         details: { ...(event.details as Record<string, unknown> | undefined ?? {}), leakguardRedacted: totalRedacted },

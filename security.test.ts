@@ -202,7 +202,7 @@ function redact(text: string): { text: string; count: number } {
 test("redactSecretsInText redacts AWS key", () => {
   const { text } = redact("key=AKIAIOSFODNN7EXAMPLE rest");
   assert.ok(!text.includes("AKIAIOSFODNN7EXAMPLE"));
-  assert.match(text, /\[REDACTED\]/);
+  assert.match(text, /\[LEAKGUARD_REDACTED\]/);
 });
 
 test("redactSecretsInText redacts OpenAI key", () => {

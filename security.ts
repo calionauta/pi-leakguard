@@ -241,7 +241,7 @@ export interface SecretPattern {
   severity: "low" | "medium" | "high" | "critical";
 }
 
-export const REDACTION_PLACEHOLDER = "[REDACTED]";
+export const REDACTION_PLACEHOLDER = "[LEAKGUARD_REDACTED]";
 
 export const SECRET_PATTERNS: SecretPattern[] = [
   { name: "AWS Access Key ID", pattern: /\bAKIA[0-9A-Z]{16}\b/g, severity: "critical" },
