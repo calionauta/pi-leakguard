@@ -331,5 +331,140 @@ export function redactSecretsInText(
   return { text: result, count: totalCount };
 }
 
+// ============================================================================
+// Egress DLP (2026 capability-separation pattern)
+// ============================================================================
+
+// Network egress tools whose arguments/body must be scanned for secrets.
+// Ported concept from CredProxy/Bastion: separate secrets from egress.
+export const EGRESS_TOOLS = new Set([
+  "curl", "wget", "nc", "netcat", "ncat", "socat", "ftp", "sftp", "ssh", "scp",
+  "rsync", "telnet", "tftp", "fetch", "node", "python", "python3", "ruby", "perl",
+]);
+
+// A URL that embeds credentials (user:pass@host) is always egress-secret.
+export const CREDENTIALD_URL_RE = /[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^:\/\s]+:[^@\/\s]{3,}@/;
+
+// Basic-auth inline flag: -u user:pass / --user user:pass
+export const BASIC_AUTH_FLAG_RE = /(?:-|--)u(?:ser)?\s+[^\s:]+(?::[^\s]+)/i;
+
+// Secret-bearing HTTP headers in egress payloads.
+export const SECRET_HEADER_RE = /(?:authorization|x-api-key|x-auth-token|proxy-authorization)\s*:/i;
+
+/**
+ * Deterministic egress DLP: blocks any network egress command whose
+ * arguments/body/URL contain secret-looking material. Unlike checkBashExfil
+ * (which only fires on env-dump/exfil *combine*), this fires on the presence
+ * of a secret in the egress payload itself — the core 2026 pattern of keeping
+ * secrets out of the model's egress channel.
+ *
+ * Conservative by design to avoid false positives: only blocks when a secret
+ * is clearly present (credentialed URL, basic-auth flag, secret header, or a
+ * high-entropy/known secret value/assignment).
+ */
+export function checkEgressSecrets(command: string): string | undefined {
+  const normalized = command.normalize("NFKC").replace(/\\(.)/g, "$1").replace(/['\"]/g, "");
+  const lower = normalized.toLowerCase();
+
+  const hasEgressTool = [...EGRESS_TOOLS].some((t) => lower.includes(t));
+  if (!hasEgressTool) return undefined;
+
+  // Credentialed URL in the egress target (user:pass@host)
+  if (CREDENTIALD_URL_RE.test(normalized)) {
+    return "egress command embeds credentials in URL (possible secret exfiltration)";
+  }
+
+  // Inline basic-auth flag: -u user:pass / --user user:pass
+  if (BASIC_AUTH_FLAG_RE.test(normalized)) {
+    return "egress command embeds inline basic-auth credentials";
+  }
+
+  // Secret-bearing HTTP headers (Authorization:, X-Api-Key:, etc.)
+  if (SECRET_HEADER_RE.test(normalized)) {
+    return "egress command sends secret-bearing HTTP header";
+  }
+
+  // High-entropy / known secret value or assignment in the payload
+  if (SECRET_VALUE_RE.test(normalized) || SECRET_ASSIGNMENT_RE.test(normalized)) {
+    return "egress command carries secret-looking material in its payload";
+  }
+
+  return undefined;
+}
+
+// ============================================================================
+// Prompt-injection detection (2026 OWASP #1 / FIDES pattern)
+// ============================================================================
+
+// Patterns indicating an indirect prompt-injection attempt embedded in data
+// the agent is about to ingest (tool results, read files, web content).
+//
+// Two tiers:
+//  - HIGH confidence (always alert/block): channel-spoofing and explicit
+//    exfil/override directives. These rarely appear in legitimate dev text.
+//  - LOW confidence (warn only): generic "ignore/do-not-tell/you-are-now"
+//    phrasing, which produces false positives in normal prose.
+export interface InjectionPattern {
+  name: string;
+  pattern: RegExp;
+  confidence: "high" | "low";
+}
+
+export const INJECTION_PATTERNS: InjectionPattern[] = [
+  { name: "system-override", pattern: /\[\s*(?:system|assistant|model|ai)\s*(?:override|prompt|instruction|message|command)\s*\]/i, confidence: "high" },
+  { name: "tool-result-spoof", pattern: /(?:tool\s*_?result|assistant\s*_?message|function\s*_?result)\s*[:=]/i, confidence: "high" },
+  { name: "exfil-instruction", pattern: /(?:send|post|upload|exfiltrate|forward|transmit)\s+(?:the|all|any)?\s*(?:secret|token|key|password|credential|env|environment|\.env)/i, confidence: "high" },
+  { name: "developer-mode", pattern: /(?:enter|enable|activate)\s+(?:developer|debug|admin|maintenance|god)\s*mode/i, confidence: "high" },
+  // LOW confidence — common in legitimate prose, warn-only
+  { name: "ignore-instructions", pattern: /ignore\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above)\s+(?:instructions|prompt|system\s*message|context)/i, confidence: "low" },
+  { name: "disregard-instructions", pattern: /disregard\s+(?:all\s+)?(?:the\s+)?(?:previous|prior|above)\s+(?:instructions|prompt|system\s*message|context)/i, confidence: "low" },
+  { name: "do-not-tell", pattern: /(?:do\s+not|don'?t|never)\s+(?:tell|mention|reveal|show|inform|alert|warn|disclose)\b/i, confidence: "low" },
+  { name: "you-are-now", pattern: /you\s+are\s+now\b/i, confidence: "low" },
+];
+
+/**
+ * Detect prompt-injection attempts in arbitrary text (tool results, file reads).
+ * Returns matched patterns split by confidence. High-confidence matches are
+ * almost always injection; low-confidence are warn-only to avoid false positives.
+ */
+export function detectInjection(text: string): { high: string[]; low: string[] } {
+  const high: string[] = [];
+  const low: string[] = [];
+  for (const { name, pattern, confidence } of INJECTION_PATTERNS) {
+    if (pattern.test(text)) (confidence === "high" ? high : low).push(name);
+  }
+  return { high, low };
+}
+
+// ============================================================================
+// Taint tracking (2026 information-flow control)
+// ============================================================================
+
+/**
+ * Decide whether content read from a sensitive path is being exfiltrated via a
+ * tool call. If `taintedPaths` contains a previously-read sensitive path and the
+ * current tool payload references that content (or a known sensitive path), the
+ * operation is blocked. Kept pure: callers maintain the taint set.
+ */
+export function isTaintedEgress(
+  toolName: string,
+  input: unknown,
+  taintedPaths: Set<string>
+): boolean {
+  if (taintedPaths.size === 0) return false;
+  const egresTools = new Set(["bash", "write", "edit"]);
+  if (!egresTools.has(toolName)) return false;
+
+  const serialized = typeof input === "string" ? input : JSON.stringify(input);
+  for (const p of taintedPaths) {
+    if (serialized.includes(p)) return true;
+  }
+  // Also block if the payload itself embeds a credentialed URL or secret
+  if (CREDENTIALD_URL_RE.test(serialized) || SECRET_VALUE_RE.test(serialized)) {
+    return true;
+  }
+  return false;
+}
+
 // Re-export for convenience
 export { existsSync };
