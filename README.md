@@ -4,7 +4,7 @@ Personal **leakguard** extension for [pi.dev](https://pi.dev) — a defense-in-d
 "seatbelt" that blocks the LLM from reading/writing/exfiltrating credentials and
 redacts secrets from tool output before the model ever sees them.
 
-> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha). This project
+> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha, published on npm/pi.dev). This project
 > keeps the original's security layers and adds a richer redaction set, interactive
 > confirmation on every block, detailed session stats, and mode persistence.
 > Credit for the core bash-security logic (symlink guard, obfuscation detection,
@@ -12,10 +12,8 @@ redacts secrets from tool output before the model ever sees them.
 > universal word scan, write-payload scan, grep/find/ls guards, and `leakguard.json`
 > persistence) goes to that project.
 >
-> **Note:** the original `@raquezha/noleaks` repository appears to have been
-> removed from GitHub/npm. This project is an independent continuation that
-> preserves and extends its ideas (not a fork, since the source repo is gone).
-> The MIT license and attribution are retained.
+> **Note:** this is an independent continuation of `@raquezha/noleaks`' ideas and security
+> layers, not an official fork. The MIT license and attribution are retained.
 
 > **Security model:** `leakguard` is a powerful defense-in-depth
 > "seatbelt", **not** an airtight sandbox. It prevents accidental leaks and stops

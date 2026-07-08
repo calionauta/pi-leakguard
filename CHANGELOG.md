@@ -5,7 +5,7 @@ All notable changes to `pi-leakguard` are documented here.
 ## [1.0.0] - 2026-07-02
 
 ### Added
-- Initial project, inspired by [`@raquezha/noleaks`](https://pi.dev/packages/@raquezha/noleaks) (now removed from GitHub/npm; independent continuation, MIT attribution retained).
+- Initial project, inspired by [`@raquezha/noleaks`](https://pi.dev/packages/@raquezha/noleaks) (MIT, published on npm/pi.dev; independent continuation, MIT attribution retained).
 - All security layers from the original, ported and tested:
   - Symlink guard (`realpathSync` before path checks).
   - Obfuscation detection (NFKC normalization variance + hidden/control chars).
