@@ -28,7 +28,7 @@
  *   /leakguard mode max     - Switch to MAX mode
  *   /leakguard mode basic   - Switch to BASIC mode
  *   /leakguard mode off     - Switch to OFF mode (DANGEROUS)
- *   /leakguard yolo         - Skip confirm prompts this session (redaction stays on)
+ *   /leakguard yolo         - Skip confirm prompts this session — session-only, resets on next session (redaction stays on)
  */
 
 import { homedir } from "node:os";
@@ -705,17 +705,19 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       return;
     }
 
-    // YOLO: skip confirm prompts for this session (redaction still applies)
+    // YOLO: skip confirm prompts for this session (redaction still applies).
+    // Session-only by design — not persisted to leakguard.json so it doesn't
+    // leak across sessions.
     if (trimmed === "yolo" || trimmed === "yolo on") {
       state.yolo = true;
       updateStatus(ctx);
-      notify(ctx, `🔥 ${EXTENSION_NAME}: YOLO mode ON - blocks will ask, but you can allow per-session. Redaction still active.`, "warning");
+      notify(ctx, `🔥 ${EXTENSION_NAME}: YOLO mode ON (session-only, resets on next session). Blocks skip the confirm; redaction stays active.`, "warning");
       return;
     }
     if (trimmed === "yolo off") {
       state.yolo = false;
       updateStatus(ctx);
-      notify(ctx, `🔒 ${EXTENSION_NAME}: YOLO mode OFF - confirm prompts restored.`, "info");
+      notify(ctx, `🔒 ${EXTENSION_NAME}: YOLO mode OFF (confirm prompts restored).`, "info");
       return;
     }
 
@@ -727,7 +729,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       `  /leakguard mode max     - Block sensitive paths AND redact secrets\n` +
       `  /leakguard mode basic   - Allow reads, still redact secrets\n` +
       `  /leakguard mode off     - Disable all protection\n` +
-      `  /leakguard yolo         - Skip confirm prompts this session (redaction stays on)`,
+      `  /leakguard yolo         - Skip confirm prompts (session-only, resets on next session; redaction stays on)`,
       "info"
     );
   };

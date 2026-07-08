@@ -70,7 +70,9 @@ Think of leakguard as shrinking the blast radius, not as a detector.
 - **Conservative patterns.** leakguard's path and redaction patterns target specific
   file names and known secret prefixes; they avoid matching normal code.
 - **YOLO mode** disables confirm prompts for a session but keeps REDACT on,
-  so secrets still never reach the chat even when I skip blocks.
+  so secrets still never reach the chat even when I skip blocks. It's
+  session-only by design — not persisted to `leakguard.json` — so I don't
+  accidentally leave it on after a restart.
 - **Redaction over blocking for output.** leakguard scrubs secrets from output
   instead of blocking it, which preserves agent utility (deploy still works via
   the environment) while preventing leakage — the preferred 2026 pattern of
@@ -129,7 +131,7 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 | `/leakguard mode max`  | Block sensitive paths AND redact secrets      |
 | `/leakguard mode basic`| Allow reads but still redact secrets          |
 | `/leakguard mode off`  | Disable all protection (dangerous)            |
-| `/leakguard yolo`      | Skip confirm prompts this session (redaction stays on) |
+| `/leakguard yolo`      | Skip confirm prompts this session — session-only, resets on next session (redaction stays on) |
 
 ## Installation (local)
 
@@ -160,7 +162,7 @@ npm run typecheck # tsc --noEmit
 - 🔒 `max` (default) - full protection
 - 🟡 `basic` - redact only
 - 🔓 `off` - no protection
-- 🔥 appended when `/leakguard yolo` is on (confirm prompts skipped; redaction stays on)
+- 🔥 appended when `/leakguard yolo` is on (confirm prompts skipped; redaction stays on). Session-only — disappears on next session start.
 
 ## License
 
