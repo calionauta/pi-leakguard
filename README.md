@@ -129,6 +129,7 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 | `/leakguard mode max`  | Block sensitive paths AND redact secrets      |
 | `/leakguard mode basic`| Allow reads but still redact secrets          |
 | `/leakguard mode off`  | Disable all protection (dangerous)            |
+| `/leakguard yolo`      | Skip confirm prompts this session (redaction stays on) |
 
 ## Installation (local)
 
