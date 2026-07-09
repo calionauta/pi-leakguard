@@ -24,7 +24,7 @@ redacts secrets from tool output before the model ever sees them.
 
 When a layer fires, here's what happens:
 
-- **BLOCK** — leakguard stops the tool call (unless you allow it via the confirm prompt or `/leakguard yolo`).
+- **BLOCK** — leakguard stops the tool call (unless you allow it via the confirm prompt or `/leakguard mode yolo`).
 - **REDACT** — leakguard replaces the secret text with `[LEAKGUARD_REDACTED]` before the model sees it; the agent still knows a secret *exists*, just not its value.
 - **WARN** — leakguard shows a notification; it doesn't block anything.
 
@@ -65,14 +65,12 @@ Think of leakguard as shrinking the blast radius, not as a detector.
 ### How I keep false positives / false negatives in check
 
 - **I confirm, I don't silently block.** Every BLOCK asks you via `ctx.ui.confirm`
-  (unless you run `/leakguard yolo`). I never silently disable the agent — you
-  decide per case. This keeps the agent useful while still safe.
+  (unless you switch to YOLO mode). This keeps the agent useful while still safe.
 - **Conservative patterns.** leakguard's path and redaction patterns target specific
   file names and known secret prefixes; they avoid matching normal code.
-- **YOLO mode** disables confirm prompts for a session but keeps REDACT on,
-  so secrets still never reach the chat even when I skip blocks. It's
-  session-only by design — not persisted to `leakguard.json` — so I don't
-  accidentally leave it on after a restart.
+- **YOLO mode** (🔥) provides the same protection as MAX but blocks silently
+  without confirm prompts. Blocks are still recorded in stats and audit log.
+  Redaction stays on. Persisted to `leakguard.json` like any other mode.
 - **Redaction over blocking for output.** leakguard scrubs secrets from output
   instead of blocking it, which preserves agent utility (deploy still works via
   the environment) while preventing leakage — the preferred 2026 pattern of
@@ -109,8 +107,9 @@ Think of leakguard as shrinking the blast radius, not as a detector.
   `max` mode.
 - **allow-once**: bypass redaction for one value without changing the mode.
   Human-only via confirm prompt — the LLM cannot trigger it.
-- **Three modes** (persisted to `~/.pi/agent/leakguard.json`):
-  - `max` (default) — block sensitive paths AND redact secrets
+- **Four modes** (persisted to `~/.pi/agent/leakguard.json`):
+  - `max` (default) — block sensitive paths AND redact secrets (with confirm prompts)
+  - `yolo` — same as MAX, but blocks silently (no confirm prompts)
   - `basic` — allow reads but still redact secrets (Safe Debugging)
   - `off` — disable all protection (dangerous)
 
@@ -139,11 +138,14 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 
 | Command                     | Description                                              |
 | --------------------------- | -------------------------------------------------------- |
+| Command                     | Description                                              |
+| --------------------------- | -------------------------------------------------------- |
 | `/leakguard`                | Show session statistics (blocked, redacted)              |
-| `/leakguard mode max`       | Block sensitive paths AND redact secrets                 |
+| `/leakguard stats`          | Same as above (alias)                                    |
+| `/leakguard mode max`       | Block sensitive paths AND redact secrets (with confirms) |
+| `/leakguard mode yolo`      | Same as MAX, but blocks silently (no confirm prompts)    |
 | `/leakguard mode basic`     | Allow reads but still redact secrets                     |
 | `/leakguard mode off`       | Disable all protection (dangerous)                       |
-| `/leakguard yolo`           | Skip confirm prompts this session — session-only, resets on next session (redaction stays on) |
 | `/leakguard allow-once`     | Allow one redacted value through without changing mode — single use, human-only via confirm |
 | `/leakguard trust <pattern>`| Trust a pattern (literal or `/regex/`) for this session — skips redaction. Human-only. |
 | `/leakguard trust list`     | List active trusted patterns                             |
@@ -176,10 +178,10 @@ npm run typecheck # tsc --noEmit
 
 ## Status Icon
 
-- 🔒 `max` (default) - full protection
+- 🔒 `max` (default) - block paths + redact, with confirms
+- 🔥 `yolo` - block paths + redact, no confirms (silent blocks)
 - 🟡 `basic` - redact only
-- 🔓 `off` - no protection
-- 🔥 appended when `/leakguard yolo` is on (confirm prompts skipped; redaction stays on). Session-only — disappears on next session start.
+- ⚪ `off` - no protection (deactivated, wide open)
 - ⚡ appended when `/leakguard allow-once` is active — next redacted output will pass through (single use, resets automatically).
 
 ## License

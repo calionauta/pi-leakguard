@@ -2,6 +2,26 @@
 
 All notable changes to `pi-leakguard` are documented here.
 
+## [0.3.0] - 2026-07-09
+
+### Changed
+- **`yolo` is now a proper mode** (`/leakguard mode yolo`), not a session-only flag.
+  YOLO mode provides the same protection as MAX (block sensitive paths + redact secrets)
+  but blocks **silently** — no confirm prompts. Persisted to `leakguard.json` like
+  any other mode.
+- `/leakguard` without args now also accepts `stats` as an explicit alias.
+- Removed standalone `/leakguard yolo` and `/leakguard yolo off` commands.
+  Use `/leakguard mode yolo` instead.
+- Status bar no longer shows a separate ` 🔥` suffix — YOLO has its own icon (🔥).
+
+### Internal
+- `Type Mode` now includes `"yolo"`.
+- `ExtensionState.yolo` removed (replaced by mode).
+- Added `isBlockMode()` helper (`mode === "max" || mode === "yolo"`).
+- All guard checks use `isBlockMode()` instead of `mode === "max"`.
+- `LeakguardConfig.mode` accepts `"yolo"`.
+- `checkBashWords()` accepts `"yolo"` and treats it like `"max"` for path checks.
+
 ## [0.2.0] - 2026-07-08
 
 ### Added

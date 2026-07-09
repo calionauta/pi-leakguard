@@ -202,7 +202,7 @@ export function checkBashExfil(command: string): string | undefined {
   return undefined;
 }
 
-export function checkBashWords(command: string, cwd: string, mode: "max" | "basic" | "off"): string | undefined {
+export function checkBashWords(command: string, cwd: string, mode: "max" | "basic" | "yolo" | "off"): string | undefined {
   const words = shellWords(command.normalize("NFKC"));
 
   for (const word of words) {
@@ -213,14 +213,14 @@ export function checkBashWords(command: string, cwd: string, mode: "max" | "basi
     }
 
     const pathReason = checkPathSensitivity(resolvePath(cwd, word));
-    if (pathReason.matched && mode === "max") {
+    if (pathReason.matched && (mode === "max" || mode === "yolo")) {
       return `command references protected path: ${word}`;
     }
   }
 
   const mentionsSensitivePath = words.some((w) => checkPathSensitivity(resolvePath(cwd, w)).matched);
   const readsOrTransforms = words.some((w) => TRANSFORM_COMMANDS.has(w.toLowerCase().split("/").pop() ?? w.toLowerCase()));
-  if (mentionsSensitivePath && readsOrTransforms && mode === "max") {
+  if (mentionsSensitivePath && readsOrTransforms && (mode === "max" || mode === "yolo")) {
     return "command appears to read or transform sensitive files";
   }
 
@@ -454,7 +454,7 @@ export function isTaintedEgress(
 // ============================================================================
 
 export interface LeakguardConfig {
-  mode?: "max" | "basic" | "off";
+  mode?: "max" | "basic" | "yolo" | "off";
   allowPaths?: string[];
   blockPaths?: string[];
   extraSecretPatterns?: { name: string; pattern: string; severity?: string }[];
