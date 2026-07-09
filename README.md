@@ -1,19 +1,19 @@
 # pi-leakguard
 
-I built this **leakguard** extension for [pi.dev](https://pi.dev) as a defense-in-depth
-"seatbelt" that keeps my coding agent from reading/writing/exfiltrating my credentials, and
+**pi-leakguard** is a defense-in-depth "seatbelt" extension for [pi.dev](https://pi.dev).
+It keeps the coding agent from reading/writing/exfiltrating credentials, and
 redacts secrets from tool output before the model ever sees them.
 
-> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha, published on npm/pi.dev). I kept that
-> project's original security layers and added a richer redaction set, interactive
+> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha, published on npm/pi.dev). pi-leakguard
+> keeps that project's original security layers and adds a richer redaction set, interactive
 > confirmation on every block, detailed session stats, and mode persistence.
 > Credit for the core bash-security logic (symlink guard, obfuscation detection,
 > env-dump/sensitive-expansion blocks, transform-smuggle, discovery/exfil combine,
 > universal word scan, write-payload scan, grep/find/ls guards, and `leakguard.json`
 > persistence) goes to raquezha.
 >
-> **Note:** this is my independent continuation of `@raquezha/noleaks`' ideas and security
-> layers, not an official fork. I kept the MIT license and attribution.
+> **Note:** this is an independent continuation of `@raquezha/noleaks`' ideas and security
+> layers, not an official fork. It keeps the MIT license and attribution.
 
 > **Security model:** this is a powerful defense-in-depth
 > "seatbelt", **not** an airtight sandbox. It stops accidental leaks and common AI
@@ -44,7 +44,7 @@ When a layer fires, here's what happens:
 | Audit log | WARN (log only) | Every block/redact/allow event | None — observability | None |
 | Extensible config | n/a | User allow/block paths + extra secret patterns | None — user-defined | None — user-defined |
 
-### Why I don't try to detect prompt injection by pattern
+### Why pi-leakguard does not detect prompt injection by pattern
 
 Detecting prompt injection with regex/heuristics is **not a consolidated
 industry strategy**. Attackers write injections in endless variations
@@ -53,7 +53,7 @@ instructions are deprecated"), so a fixed pattern list misses almost everything
 and false-positives on normal prose ("ignore the previous section"). Maintaining
 that list costs more than it's worth.
 
-So instead of trying to *catch* the injection, I stop the **harm** it causes:
+So instead of trying to *catch* the injection, it stops the **harm** it causes:
 
 - If the model gets tricked into reading a secret, **redaction** strips it
   from what it can see and repeat.
@@ -62,10 +62,10 @@ So instead of trying to *catch* the injection, I stop the **harm** it causes:
 
 Think of leakguard as shrinking the blast radius, not as a detector.
 
-### How I keep false positives / false negatives in check
+### How pi-leakguard keeps false positives / false negatives in check
 
-- **I confirm, I don't silently block.** Every BLOCK asks you via `ctx.ui.confirm`
-  (unless you switch to YOLO mode). This keeps the agent useful while still safe.
+- **It confirms, it does not silently block.** Every BLOCK asks via `ctx.ui.confirm`
+  (unless YOLO mode is active). This keeps the agent useful while still safe.
 - **Conservative patterns.** leakguard's path and redaction patterns target specific
   file names and known secret prefixes; they avoid matching normal code.
 - **YOLO mode** (🔥) provides the same protection as MAX but blocks silently
@@ -138,8 +138,6 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 
 | Command                     | Description                                              |
 | --------------------------- | -------------------------------------------------------- |
-| Command                     | Description                                              |
-| --------------------------- | -------------------------------------------------------- |
 | `/leakguard`                | Show session statistics (blocked, redacted)              |
 | `/leakguard stats`          | Same as above (alias)                                    |
 | `/leakguard mode max`       | Block sensitive paths AND redact secrets (with confirms) |
@@ -152,11 +150,7 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 | `/leakguard trust clear`    | Clear all trusted patterns                               |
 | `/leakguard trust remove n` | Remove a trusted pattern by index                        |
 
-## Installation (local)
-
-Already installed at `~/.pi/agent/extensions/leakguard/`. Auto-loaded by pi.
-
-## Installation (from GitHub)
+## Installation
 
 ```bash
 pi install git:github.com/calionauta/pi-leakguard
@@ -165,8 +159,10 @@ pi install git:github.com/calionauta/pi-leakguard
 Or pin a version:
 
 ```bash
-pi install git:github.com/calionauta/pi-leakguard@v1.3.1
+pi install git:github.com/calionauta/pi-leakguard@v0.3.0
 ```
+
+Once installed, pi auto-loads leakguard on the next session.
 
 ## Development
 
