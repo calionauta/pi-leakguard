@@ -4,14 +4,6 @@
 It keeps the coding agent from reading/writing/exfiltrating credentials, and
 redacts secrets from tool output before the model ever sees them.
 
-> **Inspired by `@raquezha/noleaks`** (MIT, by raquezha, published on npm/pi.dev). pi-leakguard
-> keeps that project's original security layers and adds a richer redaction set, interactive
-> confirmation on every block, detailed session stats, and mode persistence.
-> Credit for the core bash-security logic (symlink guard, obfuscation detection,
-> env-dump/sensitive-expansion blocks, transform-smuggle, discovery/exfil combine,
-> universal word scan, write-payload scan, grep/find/ls guards, and `leakguard.json`
-> persistence) goes to raquezha.
->
 > **Note:** this is an independent continuation of `@raquezha/noleaks`' ideas and security
 > layers, not an official fork. It keeps the MIT license and attribution.
 
