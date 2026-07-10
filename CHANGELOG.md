@@ -5,9 +5,9 @@ All notable changes to `pi-leakguard` are documented here.
 ## [0.5.0] - 2026-07-10
 
 ### Changed
-- **`"yolo"` renomeado para `"auto"`** — "yolo" soava como "liberar tudo", o oposto do que o modo faz. `"auto"` comunica claramente que bloqueia automaticamente sem confirmação. Use `/leakguard mode auto`.
-- Internamente: Mode type, `isBlockMode()`, `LeakguardConfig`, `checkBashWords()` agora usam `"auto"`.
-- Configs existentes (`leakguard.json`) com `"yolo"` cairão silenciosamente para `"max"` (padrão) ao carregar. Rode `/leakguard mode auto` para re-salvar.
+- **`"yolo"` renamed to `"auto"`** — "yolo" sounded like "allow everything", the opposite of what the mode does. `"auto"` clearly communicates "blocks automatically without confirm prompts". Use `/leakguard mode auto`.
+- Internal: Mode type, `isBlockMode()`, `LeakguardConfig`, `checkBashWords()` all use `"auto"` now.
+- Existing `leakguard.json` files with `"yolo"` silently fall back to `"max"` (default) on next load. Run `/leakguard mode auto` to re-save.
 
 ## [0.3.0] - 2026-07-09
 
