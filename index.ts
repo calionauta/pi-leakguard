@@ -6,7 +6,7 @@
  * Protects sensitive paths from access and redacts secrets from tool output.
  * Modes:
  *   - max (default): Block sensitive paths AND redact secrets from output
- *   - yolo: Same as max but blocks silently (no confirm prompts)
+ *   - auto: Same as max but blocks silently (no confirm prompts)
  *   - basic: Allow reads but still redact secrets from output (Safe Debugging)
  *   - off: Disable all protection
  *
@@ -27,7 +27,7 @@
  * Usage:
  *   /leakguard              - Show session statistics
  *   /leakguard mode max     - Switch to MAX mode
- *   /leakguard mode yolo    - Switch to YOLO mode (MAX protection, no confirm prompts)
+ *   /leakguard mode auto    - Switch to AUTO mode (MAX protection, no confirm prompts)
  *   /leakguard mode basic   - Switch to BASIC mode
  *   /leakguard mode off     - Switch to OFF mode (DANGEROUS)
  */
@@ -72,7 +72,7 @@ import {
 // Types
 // ============================================================================
 
-type Mode = "max" | "basic" | "yolo" | "off";
+type Mode = "max" | "basic" | "auto" | "off";
 
 interface SessionStats extends RedactStats {
   blockedCalls: number;
@@ -104,7 +104,7 @@ const EXTENSION_NAME = "leakguard";
 const DEFAULT_MODE: Mode = "max";
 
 /** True for modes that apply path blocking (max and yolo). */
-const isBlockMode = (m: Mode): boolean => m === "max" || m === "yolo";
+const isBlockMode = (m: Mode): boolean => m === "max" || m === "auto";
 const STATUS_KEY = "leakguard-mode";
 const CONFIG_PATH = join(homedir(), ".pi", "agent", "leakguard.json");
 const AUDIT_PATH = join(homedir(), ".pi", "agent", "leakguard-audit.jsonl");
@@ -134,7 +134,7 @@ const FILE_DELETE_COMMANDS = new Set([
 function getModeIcon(mode: Mode): string {
   switch (mode) {
     case "max": return "🔒";
-    case "yolo": return "🔥";
+    case "auto": return "🔥";
     case "basic": return "🟡";
     case "off": return "⚪";
   }
@@ -143,7 +143,7 @@ function getModeIcon(mode: Mode): string {
 function getModeLabel(mode: Mode): string {
   switch (mode) {
     case "max": return "leakguard MAX";
-    case "yolo": return "leakguard YOLO";
+    case "auto": return "leakguard AUTO";
     case "basic": return "leakguard BASIC";
     case "off": return "leakguard OFF";
   }
@@ -184,7 +184,7 @@ function loadConfig(): { mode: Mode; raw: LeakguardConfig } {
   try {
     if (existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf8")) as LeakguardConfig;
-      const mode = raw.mode === "max" || raw.mode === "basic" || raw.mode === "yolo" || raw.mode === "off" ? raw.mode : DEFAULT_MODE;
+      const mode = raw.mode === "max" || raw.mode === "basic" || raw.mode === "auto" || raw.mode === "off" ? raw.mode : DEFAULT_MODE;
       return { mode, raw };
     }
   } catch {
@@ -258,7 +258,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
   };
 
   /**
-   * Ask the user before blocking. In YOLO mode, blocks silently without
+   * Ask the user before blocking. In AUTO mode, blocks silently without
    * asking (redaction still applies at tool_result). In max/basic mode,
    * shows a confirm prompt.
    */
@@ -268,16 +268,16 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
     body: string,
     category: string
   ): Promise<boolean> => {
-    if (state.mode === "yolo") {
+    if (state.mode === "auto") {
       recordBlock(category);
-      audit({ ts: new Date().toISOString(), event: "block", tool: "confirm", category, reason: "yolo silent block" });
-      return false; // YOLO: block silently without asking
+      audit({ ts: new Date().toISOString(), event: "block", tool: "confirm", category, reason: "auto silent block" });
+      return false; // AUTO: block silently without asking
     }
     recordBlock(category);
     // pi's ui.confirm() only supports Yes/No (Promise<boolean>). We can't
-    // add a third "yolo" button; instead, surface the mode yolo command in
+    // add a third "auto" button; instead, surface the mode auto command in
     // the body so the user discovers it in context.
-    const hint = "\n\nTip: run `/leakguard mode yolo` to skip these prompts (blocks stay on, no confirm).";
+    const hint = "\n\nTip: run `/leakguard mode auto` to skip these prompts (blocks stay on, no confirm).";
     const ok = await ctx.ui.confirm(title, body + hint);
     if (!ok) {
       audit({ ts: new Date().toISOString(), event: "block", tool: "confirm", category, reason: body.slice(0, 120) });
@@ -728,14 +728,14 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       return;
     }
 
-    const modeMatch = trimmed.match(/^mode\s+(max|basic|yolo|off)$/i);
+    const modeMatch = trimmed.match(/^mode\s+(max|basic|auto|off)$/i);
     if (modeMatch) {
       const newMode = modeMatch[1]!.toLowerCase() as Mode;
       setMode(ctx, newMode);
 
       const messages: Record<Mode, string> = {
         max: `${getModeIcon("max")} ${EXTENSION_NAME}: MAX mode - blocks sensitive paths AND redacts secrets`,
-        yolo: `${getModeIcon("yolo")} ${EXTENSION_NAME}: YOLO mode - same as MAX, but blocks silently (no confirm prompts)`,
+        auto: `${getModeIcon("auto")} ${EXTENSION_NAME}: AUTO mode - same as MAX, but blocks silently (no confirm prompts)`,
         basic: `${getModeIcon("basic")} ${EXTENSION_NAME}: BASIC mode - allows reads but still redacts secrets`,
         off: `${getModeIcon("off")} ${EXTENSION_NAME}: OFF mode - all protection disabled (DANGEROUS)`,
       };
@@ -813,7 +813,7 @@ export default function leakguardPersonal(pi: ExtensionAPI): void {
       ctx,
       `${EXTENSION_NAME} commands:\n` +
       `  /leakguard                    - Show session statistics\n` +
-      `  /leakguard mode max|basic|yolo|off - Change protection mode\n` +
+      `  /leakguard mode max|basic|auto|off - Change protection mode\n` +
       `  /leakguard stats              - Show session statistics (alias for /leakguard)\n` +
       `  /leakguard allow-once         - Skip redaction for one value (single use, resets after)\n` +
       `  /leakguard trust <pattern>    - Trust a pattern (literal or /regex/) for this session\n` +

@@ -24,7 +24,7 @@ redacts secrets from tool output before the model ever sees them.
 
 When a layer fires, here's what happens:
 
-- **BLOCK** — leakguard stops the tool call (unless you allow it via the confirm prompt or `/leakguard mode yolo`).
+- **BLOCK** — leakguard stops the tool call (unless you allow it via the confirm prompt or `/leakguard mode auto`).
 - **REDACT** — leakguard replaces the secret text with `[LEAKGUARD_REDACTED]` before the model sees it; the agent still knows a secret *exists*, just not its value.
 - **WARN** — leakguard shows a notification; it doesn't block anything.
 
@@ -65,10 +65,10 @@ Think of leakguard as shrinking the blast radius, not as a detector.
 ### How pi-leakguard keeps false positives / false negatives in check
 
 - **It confirms, it does not silently block.** Every BLOCK asks via `ctx.ui.confirm`
-  (unless YOLO mode is active). This keeps the agent useful while still safe.
+  (unless AUTO mode is active). This keeps the agent useful while still safe.
 - **Conservative patterns.** leakguard's path and redaction patterns target specific
   file names and known secret prefixes; they avoid matching normal code.
-- **YOLO mode** (🔥) provides the same protection as MAX but blocks silently
+- **AUTO mode** (🔥) provides the same protection as MAX but blocks silently
   without confirm prompts. Blocks are still recorded in stats and audit log.
   Redaction stays on. Persisted to `leakguard.json` like any other mode.
 - **Redaction over blocking for output.** leakguard scrubs secrets from output
@@ -109,7 +109,7 @@ Think of leakguard as shrinking the blast radius, not as a detector.
   Human-only via confirm prompt — the LLM cannot trigger it.
 - **Four modes** (persisted to `~/.pi/agent/leakguard.json`):
   - `max` (default) — block sensitive paths AND redact secrets (with confirm prompts)
-  - `yolo` — same as MAX, but blocks silently (no confirm prompts)
+  - `auto` — same as MAX, but blocks silently (no confirm prompts)
   - `basic` — allow reads but still redact secrets (Safe Debugging)
   - `off` — disable all protection (dangerous)
 
@@ -141,7 +141,7 @@ JWTs, private-key blocks, DB URLs with credentials, generic
 | `/leakguard`                | Show session statistics (blocked, redacted)              |
 | `/leakguard stats`          | Same as above (alias)                                    |
 | `/leakguard mode max`       | Block sensitive paths AND redact secrets (with confirms) |
-| `/leakguard mode yolo`      | Same as MAX, but blocks silently (no confirm prompts)    |
+| `/leakguard mode auto`      | Same as MAX, but blocks silently (no confirm prompts)    |
 | `/leakguard mode basic`     | Allow reads but still redact secrets                     |
 | `/leakguard mode off`       | Disable all protection (dangerous)                       |
 | `/leakguard allow-once`     | Allow one redacted value through without changing mode — single use, human-only via confirm |
@@ -175,7 +175,7 @@ npm run typecheck # tsc --noEmit
 ## Status Icon
 
 - 🔒 `max` (default) - block paths + redact, with confirms
-- 🔥 `yolo` - block paths + redact, no confirms (silent blocks)
+- 🔥 `auto` - block paths + redact, no confirms (silent blocks)
 - 🟡 `basic` - redact only
 - ⚪ `off` - no protection (deactivated, wide open)
 - ⚡ appended when `/leakguard allow-once` is active — next redacted output will pass through (single use, resets automatically).
