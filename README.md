@@ -151,7 +151,7 @@ pi install git:github.com/calionauta/pi-leakguard
 Or pin a version:
 
 ```bash
-pi install git:github.com/calionauta/pi-leakguard@v0.3.0
+pi install git:github.com/calionauta/pi-leakguard
 ```
 
 Once installed, pi auto-loads leakguard on the next session.
