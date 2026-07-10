@@ -174,6 +174,10 @@ export function checkObfuscation(command: string): string | undefined {
   return undefined;
 }
 
+function containsWord(text: string, word: string): boolean {
+  return new RegExp(`\\b${word}\\b`).test(text);
+}
+
 export function checkBashExfil(command: string): string | undefined {
   const normalized = command.normalize("NFKC");
   const deobfuscated = normalized.replace(/\\(.)/g, "$1").replace(/['"]/g, "");
@@ -187,14 +191,14 @@ export function checkBashExfil(command: string): string | undefined {
     return "command references sensitive environment variable names";
   }
 
-  const hasEncodeTool = [...ENCODE_TOOLS].some((t) => deobfuscatedLower.includes(t));
+  const hasEncodeTool = [...ENCODE_TOOLS].some((t) => containsWord(deobfuscatedLower, t));
   if (hasEncodeTool && (lower.includes("|") || lower.includes(">") || lower.includes("<"))) {
     if (SECRET_VALUE_RE.test(command) || SECRET_ASSIGNMENT_RE.test(command)) {
       return "command attempts to transform or smuggle secret-looking material";
     }
   }
 
-  const hasExfilTool = [...DISCOVERY_EXFIL].some((t) => deobfuscatedLower.includes(t));
+  const hasExfilTool = [...DISCOVERY_EXFIL].some((t) => containsWord(deobfuscatedLower, t));
   if (hasExfilTool && (SECRET_KEY_RE.test(command) || /\b(env|printenv|set|export)\b/.test(lower))) {
     return "command combines network discovery/transfer with sensitive material";
   }
@@ -393,7 +397,7 @@ export function checkEgressSecrets(command: string): string | undefined {
   const normalized = command.normalize("NFKC").replace(/\\(.)/g, "$1").replace(/['\"]/g, "");
   const lower = normalized.toLowerCase();
 
-  const hasEgressTool = [...EGRESS_TOOLS].some((t) => lower.includes(t));
+  const hasEgressTool = [...EGRESS_TOOLS].some((t) => containsWord(lower, t));
   if (!hasEgressTool) return undefined;
 
   // Credentialed URL in the egress target (user:pass@host)
