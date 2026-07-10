@@ -2,7 +2,7 @@
 
 All notable changes to `pi-leakguard` are documented here.
 
-## [Unreleased]
+## [0.5.0] - 2026-07-10
 
 ### Changed
 - **`"yolo"` renamed to `"auto"`** — `"yolo"` sounded like "allow everything"; `"auto"` clearly communicates "blocks automatically (no confirms)". Use `/leakguard mode auto`.
