@@ -23,6 +23,7 @@ import {
   redactSecretsInText,
   resolvePath,
   scanForSecrets,
+  stripGitSHAs,
   type RedactStats,
 } from "./security.js";
 
@@ -200,6 +201,52 @@ test("checkBashWords blocks reading sensitive file via transform tool", () => {
 test("checkBashWords allows safe commands in max mode", () => {
   assert.equal(checkBashWords("ls -la ./src", CWD, "max"), undefined);
   assert.equal(checkBashWords("cat README.md", CWD, "max"), undefined);
+});
+
+test("checkBashWords does not false-positive on git object hashes", () => {
+  assert.equal(
+    checkBashWords("git show 94e3ae6d0d45bf554c627118a9c2c7c2a67099f9", CWD, "max"),
+    undefined,
+    "full 40-hex git SHA must not be flagged as secret material"
+  );
+  assert.equal(
+    checkBashWords("git cat-file -p 94e3ae6d0d45bf554c627118a9c2c7c2a67099f9", CWD, "max"),
+    undefined,
+    "git cat-file with SHA must not be flagged"
+  );
+  assert.equal(
+    checkBashWords("git checkout 94e3ae6d", CWD, "max"),
+    undefined,
+    "short 7-hex git SHA must not be flagged"
+  );
+  assert.equal(
+    checkBashWords("git reset --hard 94e3ae6d0d45bf554c627118a9c2c7c2a67099f9", CWD, "max"),
+    undefined,
+    "git reset --hard with SHA must not be flagged"
+  );
+});
+
+test("checkBashWords still blocks real secrets in max mode", () => {
+  assert.ok(
+    checkBashWords("echo sk-abcdefghijklmnopqrstuvwxyz012345", CWD, "max"),
+    "sk- key must still be flagged"
+  );
+  assert.ok(
+    checkBashWords("echo AKIAIOSFODNN7EXAMPLE", CWD, "max"),
+    "AKIA key must still be flagged"
+  );
+});
+
+test("checkBashWords still blocks sha256 high-entropy material", () => {
+  // 64-hex (sha256) is never a valid git SHA and must remain detected
+  assert.ok(
+    checkBashWords(
+      "echo e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      CWD,
+      "max"
+    ),
+    "standalone sha256 blob must still be flagged"
+  );
 });
 
 test("checkBashWords does not block critical utility in basic mode (only path checks)", () => {
@@ -485,4 +532,69 @@ test("placeholder without secrets shows no placeholder", () => {
   const { text, count } = redactOpts(input);
   assert.equal(text, input);
   assert.equal(count, 0);
+});
+
+// ============================================================================
+// Git SHA regression guards (stripGitSHAs) — 2026 fix for false-positive
+// blocking of legitimate git commands referencing object hashes.
+// Every consumer of SECRET_VALUE_RE must strip 7-40 hex runs (git SHAs)
+// while preserving longer high-entropy hex (sha256/sha512).
+// ============================================================================
+
+const GIT_SHA = "94e3ae6d0d45bf554c627118a9c2c7c2a67099f9"; // 40 hex
+const SHORT_SHA = "94e3ae6d"; // 8 hex
+const SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"; // 64 hex
+
+test("stripGitSHAs removes git/short SHAs but keeps sha256", () => {
+  assert.ok(!stripGitSHAs(`git show ${GIT_SHA}`).includes(GIT_SHA), "full SHA must be stripped");
+  assert.ok(!stripGitSHAs(`git checkout ${SHORT_SHA}`).includes(SHORT_SHA), "short SHA must be stripped");
+  assert.ok(stripGitSHAs(`echo ${SHA256}`).includes(SHA256), "sha256 must be preserved");
+});
+
+test("hasSecretMaterial ignores git SHA in write/grep payload", () => {
+  assert.equal(hasSecretMaterial(`git show ${GIT_SHA}`), false, "git SHA string must not flag");
+  assert.equal(
+    hasSecretMaterial({ content: `git show ${GIT_SHA}` }),
+    false,
+    "git SHA nested in object must not flag"
+  );
+  assert.ok(hasSecretMaterial(`token=${SHA256}`), "sha256 payload must still flag");
+  assert.ok(hasSecretMaterial("sk-abcdefghijklmnopqrstuvwxyz012345"), "sk- must still flag");
+});
+
+test("checkBashExfil transform-smuggle does not false-positive on git SHA", () => {
+  assert.equal(
+    checkBashExfil(`base64 ${GIT_SHA} | cat`),
+    undefined,
+    "encode tool + git SHA must not be flagged as smuggle"
+  );
+  assert.ok(
+    checkBashExfil(`base64 ${SHA256} | cat`),
+    "encode tool + sha256 blob must still be flagged"
+  );
+});
+
+test("checkEgressSecrets allows git SHA in URL but blocks sha256", () => {
+  assert.equal(
+    checkEgressSecrets(`curl https://example.com/${GIT_SHA}`),
+    undefined,
+    "egress with git SHA in path must not flag"
+  );
+  assert.ok(
+    checkEgressSecrets(`curl https://example.com/${SHA256}`),
+    "egress with sha256 blob must still flag"
+  );
+});
+
+test("isTaintedEgress ignores git SHA payload but flags sha256", () => {
+  const tainted = new Set(["/home/user/.env"]);
+  assert.equal(
+    isTaintedEgress("bash", `git show ${GIT_SHA}`, tainted),
+    false,
+    "git SHA payload with unrelated taint set must not flag"
+  );
+  assert.ok(
+    isTaintedEgress("bash", `echo ${SHA256}`, tainted),
+    "sha256 blob payload must still flag"
+  );
 });

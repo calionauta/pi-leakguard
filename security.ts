@@ -151,10 +151,21 @@ export function shellWords(command: string): string[] {
   return command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((word) => word.replace(/^['"]|['"]$/g, "")) ?? [];
 }
 
+/**
+ * Git object hashes (and short SHAs) are 7-40 char hex runs — benign, not
+ * secrets. Strip them before high-entropy hex matching so legitimate git
+ * commands (git show/cat-file/checkout/reset <sha>) are not false-positive
+ * blocked. Longer hex (sha256=64, sha512=128) is preserved for secret
+ * detection, since those lengths are never valid git SHAs.
+ */
+export function stripGitSHAs(text: string): string {
+  return text.replace(/\b[0-9a-f]{7,40}\b/gi, " ");
+}
+
 export function hasSecretMaterial(value: unknown): boolean {
   if (value == null) return false;
   if (typeof value === "string") {
-    return SECRET_VALUE_RE.test(value) || SECRET_ASSIGNMENT_RE.test(value);
+    return SECRET_VALUE_RE.test(stripGitSHAs(value)) || SECRET_ASSIGNMENT_RE.test(value);
   }
   if (typeof value !== "object") return false;
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
@@ -193,7 +204,7 @@ export function checkBashExfil(command: string): string | undefined {
 
   const hasEncodeTool = [...ENCODE_TOOLS].some((t) => containsWord(deobfuscatedLower, t));
   if (hasEncodeTool && (lower.includes("|") || lower.includes(">") || lower.includes("<"))) {
-    if (SECRET_VALUE_RE.test(command) || SECRET_ASSIGNMENT_RE.test(command)) {
+    if (SECRET_VALUE_RE.test(stripGitSHAs(command)) || SECRET_ASSIGNMENT_RE.test(command)) {
       return "command attempts to transform or smuggle secret-looking material";
     }
   }
@@ -228,7 +239,7 @@ export function checkBashWords(command: string, cwd: string, mode: "max" | "basi
     return "command appears to read or transform sensitive files";
   }
 
-  if (SECRET_VALUE_RE.test(command)) {
+  if (SECRET_VALUE_RE.test(stripGitSHAs(command))) {
     return "command contains secret-looking material";
   }
 
@@ -416,7 +427,7 @@ export function checkEgressSecrets(command: string): string | undefined {
   }
 
   // High-entropy / known secret value or assignment in the payload
-  if (SECRET_VALUE_RE.test(normalized) || SECRET_ASSIGNMENT_RE.test(normalized)) {
+  if (SECRET_VALUE_RE.test(stripGitSHAs(normalized)) || SECRET_ASSIGNMENT_RE.test(normalized)) {
     return "egress command carries secret-looking material in its payload";
   }
 
@@ -447,7 +458,7 @@ export function isTaintedEgress(
     if (serialized.includes(p)) return true;
   }
   // Also block if the payload itself embeds a credentialed URL or secret
-  if (CREDENTIALD_URL_RE.test(serialized) || SECRET_VALUE_RE.test(serialized)) {
+  if (CREDENTIALD_URL_RE.test(serialized) || SECRET_VALUE_RE.test(stripGitSHAs(serialized))) {
     return true;
   }
   return false;
