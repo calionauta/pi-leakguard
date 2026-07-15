@@ -5,8 +5,8 @@
  *
  * Protects sensitive paths from access and redacts secrets from tool output.
  * Modes:
- *   - max (default): Block sensitive paths AND redact secrets from output
- *   - auto: Same as max but blocks silently (no confirm prompts)
+ *   - max: Block sensitive paths AND redact secrets from output
+ *   - auto (default): Same as max but blocks silently (no confirm prompts)
  *   - basic: Allow reads but still redact secrets from output (Safe Debugging)
  *   - off: Disable all protection
  *
@@ -101,7 +101,7 @@ interface ToolCallResult {
 // ============================================================================
 
 const EXTENSION_NAME = "leakguard";
-const DEFAULT_MODE: Mode = "max";
+const DEFAULT_MODE: Mode = "auto";
 
 /** True for modes that apply path blocking (max and yolo). */
 const isBlockMode = (m: Mode): boolean => m === "max" || m === "auto";

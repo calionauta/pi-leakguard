@@ -100,8 +100,8 @@ Think of leakguard as shrinking the blast radius, not as a detector.
 - **allow-once**: bypass redaction for one value without changing the mode.
   Human-only via confirm prompt — the LLM cannot trigger it.
 - **Four modes** (persisted to `~/.pi/agent/leakguard.json`):
-  - `max` (default) — block sensitive paths AND redact secrets (with confirm prompts)
-  - `auto` — same as MAX, but blocks silently (no confirm prompts)
+  - `max` — block sensitive paths AND redact secrets (with confirm prompts)
+  - `auto` (default) — same as MAX, but blocks silently (no confirm prompts)
   - `basic` — allow reads but still redact secrets (Safe Debugging)
   - `off` — disable all protection (dangerous)
 
@@ -166,8 +166,8 @@ npm run typecheck # tsc --noEmit
 
 ## Status Icon
 
-- 🔒 `max` (default) - block paths + redact, with confirms
-- 🔥 `auto` - block paths + redact, no confirms (silent blocks)
+- 🔒 `max` - block paths + redact, with confirms
+- 🔥 `auto` (default) - block paths + redact, no confirms (silent blocks)
 - 🟡 `basic` - redact only
 - ⚪ `off` - no protection (deactivated, wide open)
 - ⚡ appended when `/leakguard allow-once` is active — next redacted output will pass through (single use, resets automatically).
