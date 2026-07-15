@@ -2,6 +2,14 @@
 
 All notable changes to `pi-leakguard` are documented here.
 
+## [0.6.0] - 2026-07-15
+
+### Changed
+- Default protection mode is now `auto` instead of `max`. `auto` blocks sensitive paths and redacts secrets silently (no confirm prompts), which is the safe-by-default behavior most users expect. Restore confirm-prompt behavior with `/leakguard mode max`.
+
+### Fixed
+- Git object hashes (commit SHAs) are no longer falsely flagged as secret material. Commands such as `git show <sha>`, `git cat-file -p <sha>`, `git checkout <sha>`, and `git reset --hard <sha>` no longer trigger false-positive blocks. A new `stripGitSHAs()` helper strips 7–40 char hex runs before high-entropy secret matching while preserving longer-hex (sha256/sha512) detection. Added regression tests covering every `SECRET_VALUE_RE` consumer.
+
 ## [0.5.0] - 2026-07-10
 
 ### Changed
